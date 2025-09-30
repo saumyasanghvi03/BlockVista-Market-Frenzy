@@ -51,34 +51,6 @@ Trade Indian stocks, indices, gold & crypto in a fast-paced simulation game! �
 - Futures expiry and cash settlement
 - Auto square-off at game end
 
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.8 or higher
-- pip package manager
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/saumyasanghvi03/BlockVista-Market-Frenzy.git
-   cd BlockVista-Market-Frenzy
-   ```
-
-2. **Install required packages**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Run the application**
-   ```bash
-   streamlit run app.py
-   ```
-
-4. **Open your browser**
-   - The app will automatically open at `http://localhost:8501`
-   - If not, navigate to the URL shown in your terminal
-
 ## 🎮 How to Play
 
 1. **Join the Game** - Enter your name and select a trading mode (Trader/HFT/HNI)
