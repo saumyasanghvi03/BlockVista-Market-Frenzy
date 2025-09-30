@@ -112,6 +112,19 @@ def apply_event_adjustment(prices, event_type):
             if sym in adjusted_prices: adjusted_prices[sym] *= 1.10
     return adjusted_prices
 
+# --- Currency Formatting ---
+def format_indian_currency(n):
+    """Formats a number into Indian currency style (Lakhs, Crores)."""
+    if n is None:
+        return "₹0.00"
+    n = float(n)
+    if abs(n) < 100000:
+        return f"₹{n:,.2f}"
+    elif abs(n) < 10000000:
+        return f"₹{n/100000:.2f}L"
+    else:
+        return f"₹{n/10000000:.2f}Cr"
+
 # --- Portfolio Optimization & Algo Strategy ---
 def optimize_portfolio(player_holdings):
     symbols = [s for s in player_holdings.keys() if s in NIFTY50_SYMBOLS + CRYPTO_SYMBOLS]
@@ -229,9 +242,9 @@ def render_trade_execution_panel(prices):
         pnl_arrow = "🔼" if pnl >= 0 else "🔽"
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Cash", f"₹{player['capital']:,.2f}")
-        c2.metric("Portfolio Value", f"₹{total_value:,.2f}")
-        c3.metric("P&L", f"₹{pnl:,.2f}", f"{pnl_arrow} {pnl/INITIAL_CAPITAL:.2%}")
+        c1.metric("Cash", format_indian_currency(player['capital']))
+        c2.metric("Portfolio Value", format_indian_currency(total_value))
+        c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow} {pnl/INITIAL_CAPITAL:.2%}")
 
         tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Holdings & History", "📊 Strategy & Insights"]
         tab1, tab2, tab3, tab4 = st.tabs(tabs)
@@ -260,7 +273,7 @@ def render_trade_interface(player_name, player, prices, disabled_status):
         else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"option_{player_name}", disabled=not disabled_status)
         
         current_price = prices.get(symbol_choice, 0)
-        st.info(f"Current Price of {symbol_choice}: ₹{current_price:,.2f}")
+        st.info(f"Current Price of {symbol_choice}: {format_indian_currency(current_price)}")
         
     with col2:
         qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"qty_{player_name}", disabled=not disabled_status)
@@ -294,15 +307,16 @@ def render_algo_trading_tab(player_name, player, disabled_status):
 def render_holdings_and_history(player_name, player, prices):
     st.subheader("Current Holdings")
     if player['holdings']:
-        holdings_data = [{"Symbol": sym, "Quantity": qty, "Current Value": f"₹{prices.get(sym, 0) * qty:,.2f}"} for sym, qty in player['holdings'].items()]
-        st.dataframe(pd.DataFrame(holdings_data))
+        holdings_data = [{"Symbol": sym, "Quantity": qty, "Value": prices.get(sym, 0) * qty} for sym, qty in player['holdings'].items()]
+        holdings_df = pd.DataFrame(holdings_data)
+        st.dataframe(holdings_df.style.format(formatter={"Value": format_indian_currency}))
     else:
         st.info("No holdings yet.")
         
     st.subheader("Transaction History")
     if st.session_state.transactions.get(player_name):
         trans_df = pd.DataFrame(st.session_state.transactions[player_name], columns=["Time", "Action", "Symbol", "Qty", "Price", "Total"])
-        st.dataframe(trans_df.style.format({"Price": "{:,.2f}", "Total": "{:,.2f}"}))
+        st.dataframe(trans_df.style.format(formatter={"Price": format_indian_currency, "Total": format_indian_currency}))
     else:
         st.info("No transactions recorded.")
 
@@ -396,7 +410,7 @@ def log_transaction(player_name, action, symbol, qty, price, total, is_algo=Fals
     prefix = "🤖 Algo" if is_algo else ""
     st.session_state.transactions.setdefault(player_name, []).append([time.strftime("%H:%M:%S"), f"{prefix} {action}".strip(), symbol, qty, price, total])
     if not is_algo:
-        st.success(f"Trade Executed: {action} {qty} {symbol} @ ₹{price:,.2f}")
+        st.success(f"Trade Executed: {action} {qty} {symbol} @ {format_indian_currency(price)}")
     else:
         st.toast(f"Algo Trade: {action} {qty} {symbol}", icon="🤖")
 
@@ -409,7 +423,7 @@ def render_leaderboard(prices):
     
     if lb:
         lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L"]).sort_values("Portfolio Value", ascending=False)
-        st.dataframe(lb_df.style.format({"Portfolio Value": "₹{:,.2f}", "P&L": "₹{:,.2f}"}), use_container_width=True)
+        st.dataframe(lb_df.style.format(formatter={"Portfolio Value": format_indian_currency, "P&L": format_indian_currency}), use_container_width=True)
         
         if st.session_state.game_status == "Finished":
             st.balloons()
@@ -425,7 +439,7 @@ def render_global_trade_feed():
     if all_trades:
         feed_df = pd.DataFrame(all_trades, columns=["Player", "Time", "Action", "Symbol", "Qty", "Price", "Total"])
         feed_df = feed_df.sort_values(by="Time", ascending=False)
-        st.dataframe(feed_df.style.format({"Price": "₹{:,.2f}", "Total": "₹{:,.2f}"}), height=200, use_container_width=True)
+        st.dataframe(feed_df.style.format(formatter={"Price": format_indian_currency, "Total": format_indian_currency}), height=200, use_container_width=True)
     else:
         st.info("No market activity yet.")
 
