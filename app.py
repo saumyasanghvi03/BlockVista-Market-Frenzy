@@ -47,6 +47,7 @@ class GameState:
         self.futures_expiry_time = 0
         self.futures_settled = False
         self.prices = {}
+        self.base_real_prices = {} # Stores prices fetched once per day
         self.price_history = []
         self.transactions = {}
         self.liquidity = {s: random.uniform(0.5, 1.0) for s in ALL_SYMBOLS}
@@ -56,8 +57,11 @@ class GameState:
         self.volatility_multiplier = 1.0
 
     def reset(self):
-        """Resets the game to its initial state."""
-        self.__init__() # Re-initialize all attributes
+        """Resets the game to its initial state, but keeps the daily base prices."""
+        base_prices = self.base_real_prices
+        self.__init__()
+        self.base_real_prices = base_prices
+
 
 @st.cache_resource
 def get_game_state():
@@ -73,9 +77,9 @@ QUIZ_QUESTIONS = [
 ]
 
 # --- Data Fetching & Market Simulation ---
-@st.cache_data(ttl=30) # Fetch base prices more frequently
-def get_real_market_prices():
-    """Fetches the latest real-world price from yfinance for real assets."""
+@st.cache_data(ttl=86400) # Cache for 24 hours
+def get_daily_base_prices():
+    """Fetches real-world prices from yfinance ONCE per day to use as a baseline."""
     prices = {}
     yf_symbols = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL, NIFTY_INDEX_SYMBOL, BANKNIFTY_INDEX_SYMBOL]
     try:
@@ -88,12 +92,27 @@ def get_real_market_prices():
     except Exception:
         for symbol in yf_symbols: # Full fallback on API error
             prices[symbol] = random.uniform(10, 50000)
+    st.toast("Fetched daily base market prices.")
     return prices
 
-def calculate_derived_prices(real_prices):
-    """Calculates prices for simulated assets like Futures, Options, and ETFs based on real index prices."""
+def simulate_tick_prices(last_prices):
+    """Applies small, random fluctuations to the last known prices to create a live market feel."""
     game_state = get_game_state()
-    derived_prices = real_prices.copy()
+    simulated_prices = last_prices.copy()
+    volatility_multiplier = getattr(game_state, 'volatility_multiplier', 1.0)
+
+    for symbol, price in simulated_prices.items():
+        if symbol not in FUTURES_SYMBOLS + LEVERAGED_ETFS + OPTION_SYMBOLS:
+            noise = random.uniform(-0.001, 0.001) * volatility_multiplier
+            simulated_prices[symbol] = price * (1 + noise)
+            
+    return simulated_prices
+
+
+def calculate_derived_prices(base_prices):
+    """Calculates prices for simulated assets like Futures, Options, and ETFs based on the current simulated index prices."""
+    game_state = get_game_state()
+    derived_prices = base_prices.copy()
 
     nifty_price = derived_prices.get(NIFTY_INDEX_SYMBOL, 20000)
     banknifty_price = derived_prices.get(BANKNIFTY_INDEX_SYMBOL, 45000)
@@ -578,8 +597,9 @@ def main():
     
     if game_state.game_status == "Running": 
         # Optimized refresh rate for rapid UI processing
-        time.sleep(1)
+        time.sleep(2)
         st.rerun()
 
 if __name__ == "__main__":
     main()
+
