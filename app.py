@@ -555,7 +555,11 @@ def render_algo_trading_tab(player_name, player, disabled):
     active_algo = player.get('algo', 'Off')
     player['algo'] = st.selectbox("Choose Strategy", all_strats, index=all_strats.index(active_algo) if active_algo in all_strats else 0, disabled=disabled, key=f"algo_{player_name}")
     
-    if player['algo'] in default_strats and player['algo'] != 'Off': st.info("Default strategy description...")
+    if player['algo'] in default_strats and player['algo'] != 'Off': 
+        if player['algo'] == "Momentum Trader": st.info("This bot buys assets that have risen in price and sells those that have fallen, betting that recent trends will continue.")
+        elif player['algo'] == "Mean Reversion": st.info("This bot buys assets that have recently fallen and sells those that have risen, betting on a return to their average price.")
+        elif player['algo'] == "Volatility Breakout": st.info("This bot identifies assets making a significant daily price move (up or down) and trades in the same direction, aiming to capitalize on strong momentum.")
+        elif player['algo'] == "Value Investor": st.info("This bot looks for assets that have dropped significantly over the past month and buys them, operating on the principle of buying undervalued assets for a potential long-term recovery.")
 
     with st.expander("Create Custom Strategy"):
         st.markdown("##### Define Your Own Algorithm")
