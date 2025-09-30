@@ -10,6 +10,9 @@ import plotly.graph_objects as go
 import numpy as np
 from pypfopt import EfficientFrontier, risk_models, expected_returns
 
+# --- Page Configuration ---
+st.set_page_config(layout="wide", page_title="BlockVista Market Frenzy", page_icon="📈")
+
 # --- API & Game Configuration ---
 GAME_NAME = "BlockVista Market Frenzy"
 INITIAL_CAPITAL = 1000000  # ₹10 lakh
@@ -71,7 +74,7 @@ def get_live_prices():
     return prices
 
 @st.cache_data(ttl=3600)
-def get_historical_data(symbols, period="3mo"):
+def get_historical_data(symbols, period="6mo"):
     try:
         data = yf.download(tickers=symbols, period=period, progress=False)
         return data['Close']
@@ -127,7 +130,7 @@ def optimize_portfolio(player_holdings):
         weights = ef.max_sharpe()
         cleaned_weights = ef.clean_weights()
         
-        return cleaned_weights, ef.portfolio_performance(verbose=True)
+        return cleaned_weights, ef.portfolio_performance(verbose=False)
     except Exception as e:
         return None, f"Optimization failed: {e}"
 
@@ -135,8 +138,10 @@ def optimize_portfolio(player_holdings):
 def init_game_state():
     if "players" not in st.session_state:
         st.session_state.players = {}
-    if "game_start" not in st.session_state:
-        st.session_state.game_start = time.time()
+    if "game_status" not in st.session_state:
+        st.session_state.game_status = "Stopped" # Can be Running, Stopped, Finished
+    if "game_start_time" not in st.session_state:
+        st.session_state.game_start_time = 0
     if "prices" not in st.session_state:
         st.session_state.prices = get_live_prices()
     if "event_active" not in st.session_state:
@@ -161,11 +166,11 @@ def render_sidebar():
     player_name = st.sidebar.text_input("Enter Name", key="name_input")
     mode = st.sidebar.radio("Select Mode", ["VIP Guest", "Student"], key="mode_select")
     
-    if st.sidebar.button("Join Game"):
+    if st.sidebar.button("Join Game", disabled=(st.session_state.game_status == "Running")):
         if player_name and player_name.strip() and player_name not in st.session_state.players:
             st.session_state.players[player_name] = {
                 "mode": mode, "capital": INITIAL_CAPITAL, "holdings": {}, "pnl": 0,
-                "leverage": 1.0, "margin_calls": 0
+                "leverage": 1.0, "margin_calls": 0, "pending_orders": []
             }
             st.session_state.transactions[player_name] = []
             st.sidebar.success(f"{player_name} joined as {mode}!")
@@ -173,16 +178,40 @@ def render_sidebar():
             st.sidebar.error("Name is invalid or already taken!")
 
     st.sidebar.title("⚙️ Admin Controls")
-    if st.sidebar.button("Reset Game"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.sidebar.success("Game reset!")
+    if st.sidebar.button("▶️ Start Game", type="primary"):
+        if st.session_state.players:
+            st.session_state.game_status = "Running"
+            st.session_state.game_start_time = time.time()
+            st.toast("Game Started!", icon="🎉")
+        else:
+            st.sidebar.warning("Add at least one player to start.")
+            
+    if st.sidebar.button("⏸️ Stop Game"):
+        st.session_state.game_status = "Stopped"
+        st.toast("Game Paused!", icon="⏸️")
+        
+    if st.sidebar.button("🔄 Reset Game"):
+        # Keep players but reset their stats
+        for player in st.session_state.players.values():
+            player.update({"capital": INITIAL_CAPITAL, "holdings": {}, "pnl": 0, "pending_orders": []})
+        st.session_state.game_status = "Stopped"
+        st.session_state.game_start_time = 0
+        st.toast("Game has been reset.", icon="🔄")
         st.rerun()
 
 def render_main_interface(prices):
-    st.title(GAME_NAME)
-    remaining_time = max(0, ROUND_DURATION - int(time.time() - st.session_state.game_start))
-    st.markdown(f"<div class='timer'>Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}</div>", unsafe_allow_html=True)
+    st.title(f"📈 {GAME_NAME}")
+    
+    game_status = st.session_state.game_status
+    if game_status == "Running":
+        remaining_time = max(0, ROUND_DURATION - int(time.time() - st.session_state.game_start_time))
+        if remaining_time == 0:
+            st.session_state.game_status = "Finished"
+        st.markdown(f"<div class='timer'>Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}</div>", unsafe_allow_html=True)
+    elif game_status == "Stopped":
+        st.info("Game is paused. Press 'Start Game' in the sidebar to begin.")
+    elif game_status == "Finished":
+        st.success("Game has finished! See the final leaderboard below.")
 
     st.markdown("<div class='section'>Live Market Prices</div>", unsafe_allow_html=True)
     price_df = pd.DataFrame.from_dict(prices, orient='index', columns=['Price']).sort_index()
@@ -197,7 +226,7 @@ def render_player_dashboard(player_name, prices):
     player = st.session_state.players[player_name]
     
     # Portfolio Metrics
-    st.markdown(f"<div class='section'>{player_name}'s Portfolio (Mode: {player['mode']})</div>", unsafe_allow_html=True)
+    st.markdown(f"### {player_name}'s Terminal (Mode: {player['mode']})")
     holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
     total_value = player['capital'] + holdings_value
     leverage = player.get('leverage', 1.0)
@@ -205,43 +234,80 @@ def render_player_dashboard(player_name, prices):
     pnl = leveraged_value - INITIAL_CAPITAL
     player['pnl'] = pnl
     pnl_color = "green" if pnl >= 0 else "red"
+    pnl_arrow = "🔼" if pnl >= 0 else "🔽"
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Cash", f"₹{player['capital']:,.2f}")
     col2.metric("Portfolio Value", f"₹{leveraged_value:,.2f}")
-    col3.metric("P&L", f"₹{pnl:,.2f}")
+    col3.metric("P&L", f"₹{pnl:,.2f}", f"{pnl_arrow} {pnl/INITIAL_CAPITAL:.2%}")
 
     # Tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs(["Trade", "Holdings & History", "Charts", "Portfolio Optimizer"])
+    tabs = ["Trade", "Advanced Trading", "Holdings & History", "Strategy & Insights"]
+    tab1, tab2, tab3, tab4 = st.tabs(tabs)
+
+    is_game_running = st.session_state.game_status == "Running"
 
     with tab1:
-        render_trade_interface(player_name, player, prices)
+        render_trade_interface(player_name, player, prices, is_game_running)
     with tab2:
-        render_holdings_and_history(player_name, player, prices)
+        render_advanced_trade_interface(player_name, player, prices, is_game_running)
     with tab3:
-        render_charts(player['holdings'])
+        render_holdings_and_history(player_name, player, prices)
     with tab4:
-        render_optimizer(player['holdings'])
+        render_strategy_tab(player)
 
-def render_trade_interface(player_name, player, prices):
-    action = st.radio("Action", ["Buy", "Sell", "Short"], horizontal=True, key=f"action_{player_name}")
-    asset_type = st.radio("Asset Type", ["Stock", "Crypto", "Gold", "Option"], horizontal=True, key=f"asset_{player_name}")
+def render_trade_interface(player_name, player, prices, disabled_status):
+    st.subheader("Market Order")
+    action = st.radio("Action", ["Buy", "Sell", "Short"], horizontal=True, key=f"action_{player_name}", disabled=not disabled_status)
+    asset_type = st.radio("Asset Type", ["Stock", "Crypto", "Gold", "Option"], horizontal=True, key=f"asset_{player_name}", disabled=not disabled_status)
 
     if asset_type == "Stock":
         symbols = [s.replace('.NS', '') for s in NIFTY50_SYMBOLS]
-        symbol_choice = st.selectbox("Stock", symbols, key=f"stock_{player_name}") + '.NS'
+        symbol_choice = st.selectbox("Stock", symbols, key=f"stock_{player_name}", disabled=not disabled_status) + '.NS'
     elif asset_type == "Crypto":
-        symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"crypto_{player_name}")
+        symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"crypto_{player_name}", disabled=not disabled_status)
     elif asset_type == "Gold":
         symbol_choice = GOLD_SYMBOL
     else:
-        symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"option_{player_name}")
+        symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"option_{player_name}", disabled=not disabled_status)
 
-    qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"qty_{player_name}")
+    qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"qty_{player_name}", disabled=not disabled_status)
     
-    if st.button("Place Trade", key=f"trade_btn_{player_name}"):
+    if st.button("Place Trade", key=f"trade_btn_{player_name}", type="primary", disabled=not disabled_status):
         execute_trade(player_name, player, action, symbol_choice, qty, prices)
         st.rerun()
+
+def render_advanced_trade_interface(player_name, player, prices, disabled_status):
+    st.subheader("Conditional Orders")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info("A **Limit Order** executes a trade at a specific price or better.")
+        limit_action = st.radio("Action", ["Buy", "Sell"], key=f"limit_action_{player_name}", horizontal=True, disabled=not disabled_status)
+        limit_symbol = st.selectbox("Asset", ALL_SYMBOLS, key=f"limit_symbol_{player_name}", disabled=not disabled_status)
+        limit_price = st.number_input("Target Price", min_value=0.01, key=f"limit_price_{player_name}", disabled=not disabled_status, format="%.2f")
+        limit_qty = st.number_input("Quantity", min_value=1, step=1, key=f"limit_qty_{player_name}", disabled=not disabled_status)
+        if st.button("Place Limit Order", disabled=not disabled_status):
+            player['pending_orders'].append({'type': 'limit', 'action': limit_action, 'symbol': limit_symbol, 'qty': limit_qty, 'price': limit_price})
+            st.success("Limit order placed!")
+            
+    with col2:
+        st.info("A **Stop Loss** sells an asset if it drops to a certain price to limit losses.")
+        stop_symbol = st.selectbox("Asset to Protect", list(player['holdings'].keys()), key=f"stop_symbol_{player_name}", disabled=not disabled_status)
+        stop_price = st.number_input("Stop Price", min_value=0.01, key=f"stop_price_{player_name}", disabled=not disabled_status, format="%.2f")
+        if st.button("Place Stop Loss", disabled=not disabled_status):
+             qty_to_sell = player['holdings'].get(stop_symbol, 0)
+             if qty_to_sell > 0:
+                player['pending_orders'].append({'type': 'stop_loss', 'action': 'Sell', 'symbol': stop_symbol, 'qty': qty_to_sell, 'price': stop_price})
+                st.success("Stop loss order placed!")
+             else:
+                st.warning("You don't hold this asset.")
+
+    st.subheader("Pending Orders")
+    if player['pending_orders']:
+        st.dataframe(player['pending_orders'])
+    else:
+        st.write("No pending orders.")
 
 def render_holdings_and_history(player_name, player, prices):
     st.subheader("Current Holdings")
@@ -262,21 +328,38 @@ def render_holdings_and_history(player_name, player, prices):
     else:
         st.info("No transactions recorded.")
 
-def render_charts(holdings):
-    if not holdings:
-        st.info("No assets in portfolio to chart.")
-        return
+def render_strategy_tab(player):
+    st.subheader("📊 Strategy & Insights")
+    sub_tab1, sub_tab2 = st.tabs(["Technical Analysis (SMA)", "Portfolio Optimizer"])
     
-    chart_symbol = st.selectbox("Select Asset to Chart", list(holdings.keys()))
-    hist_data = get_historical_data([chart_symbol], period="1y")
+    with sub_tab1:
+        render_sma_chart(player['holdings'])
+    with sub_tab2:
+        render_optimizer(player['holdings'])
+
+def render_sma_chart(holdings):
+    st.markdown("##### Simple Moving Average (SMA) Chart")
+    st.write("SMAs smooth out price data to identify trend direction. A shorter-term average crossing above a longer-term one (e.g., 20-day over 50-day) can signal bullish momentum.")
+    
+    chartable_assets = [s for s in holdings.keys() if s not in OPTION_SYMBOLS]
+    if not chartable_assets:
+        st.info("No chartable assets in portfolio (stocks, crypto, gold).")
+        return
+        
+    chart_symbol = st.selectbox("Select Asset to Chart", chartable_assets)
+    hist_data = get_historical_data([chart_symbol], period="6mo")
 
     if not hist_data.empty:
-        fig = go.Figure(data=[go.Candlestick(x=hist_data.index,
-                                             open=hist_data[chart_symbol],
-                                             high=hist_data[chart_symbol],
-                                             low=hist_data[chart_symbol],
-                                             close=hist_data[chart_symbol])])
-        fig.update_layout(title=f"Historical Price Chart for {chart_symbol}", xaxis_rangeslider_visible=False)
+        df = hist_data.to_frame(name='Close')
+        df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        df['SMA_50'] = df['Close'].rolling(window=50).mean()
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name='Price'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], mode='lines', name='20-Day SMA'))
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], mode='lines', name='50-Day SMA'))
+        
+        fig.update_layout(title=f"Price and Moving Averages for {chart_symbol}", xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning(f"Could not load historical data for {chart_symbol}.")
@@ -295,42 +378,48 @@ def render_optimizer(holdings):
         else:
             st.error(performance) # Display error message
 
-def execute_trade(player_name, player, action, symbol, qty, prices):
+def execute_trade(player_name, player, action, symbol, qty, prices, is_conditional=False):
     base_price = prices.get(symbol, 0)
     if base_price == 0:
+        if is_conditional: return False # Fail silently for conditional orders
         st.error(f"Could not get price for {symbol}. Trade cancelled.")
-        return
+        return False
 
     liq_level = LIQUIDITY_LEVELS.get(symbol, 1.0)
     slippage_mult = calculate_slippage(symbol, qty, action, liq_level)
     trade_price = base_price * slippage_mult
     cost = trade_price * qty
     
+    trade_executed = False
     if action == "Buy":
         if player['capital'] >= cost:
             player['capital'] -= cost
             player['holdings'][symbol] = player['holdings'].get(symbol, 0) + qty
             log_transaction(player_name, action, symbol, qty, trade_price, cost)
-        else:
-            st.error("Insufficient capital!")
+            trade_executed = True
+        elif not is_conditional: st.error("Insufficient capital!")
     elif action == "Short":
         margin_needed = cost * MARGIN_REQUIREMENT
         if player['capital'] >= margin_needed:
-            player['capital'] += cost # Add proceeds to capital
+            player['capital'] += cost 
             player['holdings'][symbol] = player['holdings'].get(symbol, 0) - qty
             log_transaction(player_name, action, symbol, qty, trade_price, -cost)
-        else:
-            st.error("Insufficient capital for margin!")
+            trade_executed = True
+        elif not is_conditional: st.error("Insufficient capital for margin!")
     elif action == "Sell":
         current_qty = player['holdings'].get(symbol, 0)
         if abs(current_qty) >= qty:
             player['capital'] += cost
             player['holdings'][symbol] -= qty
-            if player['holdings'][symbol] == 0:
-                del player['holdings'][symbol]
+            if player['holdings'][symbol] == 0: del player['holdings'][symbol]
             log_transaction(player_name, action, symbol, qty, trade_price, cost)
-        else:
-            st.error("Insufficient holdings to sell!")
+            trade_executed = True
+        elif not is_conditional: st.error("Insufficient holdings to sell!")
+        
+    if trade_executed and is_conditional:
+        st.toast(f"Order Executed: {action} {qty} {symbol}", icon="✅")
+        
+    return trade_executed
 
 def log_transaction(player_name, action, symbol, qty, price, total):
     st.session_state.transactions[player_name].append([
@@ -351,13 +440,14 @@ def render_leaderboard(prices):
         lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L"]).sort_values("Portfolio Value", ascending=False)
         st.dataframe(lb_df.style.format({"Portfolio Value": "₹{:,.2f}", "P&L": "₹{:,.2f}"}))
         
-        remaining_time = max(0, ROUND_DURATION - int(time.time() - st.session_state.game_start))
-        if remaining_time <= 0:
+        if st.session_state.game_status == "Finished":
             st.balloons()
             st.subheader("🏆 Round Over! Final Standings:")
             st.table(lb_df.head(3))
 
 def handle_market_events(prices):
+    if st.session_state.game_status != "Running": return prices
+    
     if not st.session_state.event_active and random.random() < 0.015:
         events = ["Flash Crash", "Bull Rally", "Crypto Pump", "Regulatory Crackdown"]
         event_type = random.choice(events)
@@ -379,6 +469,8 @@ def handle_market_events(prices):
     return prices
             
 def handle_quiz_bonus():
+    if st.session_state.game_status != "Running": return
+
     if not st.session_state.quiz_triggered and random.random() < 0.005 and st.session_state.players:
         st.session_state.quiz_triggered = True
         player_name = random.choice(list(st.session_state.players.keys()))
@@ -405,6 +497,33 @@ def handle_quiz_bonus():
                 del st.session_state.quiz_data
                 st.rerun()
 
+def process_pending_orders(prices):
+    if st.session_state.game_status != "Running": return
+    
+    for name, player in st.session_state.players.items():
+        orders_to_remove = []
+        for i, order in enumerate(player['pending_orders']):
+            current_price = prices.get(order['symbol'])
+            if not current_price: continue
+            
+            order_executed = False
+            # Limit Buy: price drops to or below target
+            if order['type'] == 'limit' and order['action'] == 'Buy' and current_price <= order['price']:
+                order_executed = execute_trade(name, player, order['action'], order['symbol'], order['qty'], prices, is_conditional=True)
+            # Limit Sell: price rises to or above target
+            elif order['type'] == 'limit' and order['action'] == 'Sell' and current_price >= order['price']:
+                order_executed = execute_trade(name, player, order['action'], order['symbol'], order['qty'], prices, is_conditional=True)
+            # Stop Loss: price drops to or below stop price
+            elif order['type'] == 'stop_loss' and current_price <= order['price']:
+                 order_executed = execute_trade(name, player, order['action'], order['symbol'], order['qty'], prices, is_conditional=True)
+            
+            if order_executed:
+                orders_to_remove.append(i)
+        
+        # Remove executed orders safely (in reverse)
+        for i in sorted(orders_to_remove, reverse=True):
+            del player['pending_orders'][i]
+
 # --- Main Game Loop ---
 def main():
     load_css()
@@ -414,6 +533,8 @@ def main():
     
     prices = get_live_prices()
     prices = handle_market_events(prices)
+    
+    process_pending_orders(prices)
     
     render_main_interface(prices)
     render_leaderboard(prices)
