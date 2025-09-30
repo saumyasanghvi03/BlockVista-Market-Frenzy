@@ -37,6 +37,16 @@ MARGIN_REQUIREMENT = 0.2
 ADMIN_PASSWORD = "100370" # Set your admin password here
 BID_ASK_SPREAD = 0.001 # 0.1% spread
 
+# --- Pre-built News Headlines ---
+PRE_BUILT_NEWS = [
+    {"headline": "Breaking: RBI unexpectedly cuts repo rate by 25 basis points!", "impact": "Bull Rally"},
+    {"headline": "Disappointing quarterly results from major IT firms weigh on the market.", "impact": "Flash Crash"},
+    {"headline": "Government announces major infrastructure spending package, boosting banking stocks.", "impact": "Banking Boost"},
+    {"headline": "Geopolitical tensions rise in the Middle East, causing market uncertainty.", "impact": "Flash Crash"},
+    {"headline": "FIIs show renewed interest in Indian equities, leading to broad-based buying.", "impact": "Bull Rally"},
+    {"headline": "New regulations announced for the tech sector; investors react cautiously.", "impact": "Sector Rotation"},
+]
+
 # --- Game State Management (Singleton for Live Sync) ---
 class GameState:
     """A singleton class to hold the shared game state across all user sessions."""
@@ -51,6 +61,7 @@ class GameState:
         self.base_real_prices = {} # Stores prices fetched once per day
         self.price_history = []
         self.transactions = {}
+        self.market_sentiment = {s: 0 for s in ALL_SYMBOLS}
         self.liquidity = {s: random.uniform(0.5, 1.0) for s in ALL_SYMBOLS}
         self.event_active = False
         self.event_type = None
@@ -97,15 +108,17 @@ def get_daily_base_prices():
     return prices
 
 def simulate_tick_prices(last_prices):
-    """Applies small, random fluctuations to the last known prices to create a live market feel."""
+    """Applies small, random fluctuations and market sentiment to prices."""
     game_state = get_game_state()
     simulated_prices = last_prices.copy()
     volatility_multiplier = getattr(game_state, 'volatility_multiplier', 1.0)
 
     for symbol, price in simulated_prices.items():
         if symbol not in FUTURES_SYMBOLS + LEVERAGED_ETFS + OPTION_SYMBOLS:
-            noise = random.uniform(-0.001, 0.001) * volatility_multiplier
-            simulated_prices[symbol] = price * (1 + noise)
+            sentiment = game_state.market_sentiment.get(symbol, 0)
+            noise = random.uniform(-0.0005, 0.0005) * volatility_multiplier
+            price_multiplier = 1 + (sentiment * 0.001) + noise
+            simulated_prices[symbol] = price * price_multiplier
             
     return simulated_prices
 
@@ -169,9 +182,9 @@ def calculate_slippage(player, symbol, qty, action):
 def apply_event_adjustment(prices, event_type):
     adjusted_prices = prices.copy()
     if event_type == "Flash Crash":
-        adjusted_prices = {k: v * random.uniform(0.88, 0.92) for k, v in adjusted_prices.items()}
+        adjusted_prices = {k: v * random.uniform(0.95, 0.98) for k, v in adjusted_prices.items()}
     elif event_type == "Bull Rally":
-        adjusted_prices = {k: v * random.uniform(1.08, 1.12) for k, v in adjusted_prices.items()}
+        adjusted_prices = {k: v * random.uniform(1.02, 1.05) for k, v in adjusted_prices.items()}
     elif event_type == "Banking Boost":
         for sym in ['HDFCBANK.NS', 'ICICIBANK.NS', 'KOTAKBANK.NS', 'SBIN.NS', 'AXISBANK.NS']:
             if sym in adjusted_prices: adjusted_prices[sym] *= 1.07
@@ -254,17 +267,21 @@ def render_sidebar():
         
         st.sidebar.markdown("---")
         st.sidebar.subheader("Broadcast News")
-        news_headline = st.sidebar.text_input("News Headline")
-        news_impact = st.sidebar.selectbox("Market Impact", ["Bull Rally", "Flash Crash", "Banking Boost", "Sector Rotation"])
+        
+        news_options = [news['headline'] for news in PRE_BUILT_NEWS]
+        news_to_trigger = st.sidebar.selectbox("Select News to Publish", ["None"] + news_options)
+
         if st.sidebar.button("Publish News"):
-            if news_headline:
-                game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_headline}")
-                if len(game_state.news_feed) > 5: game_state.news_feed.pop()
-                game_state.event_type = news_impact
-                game_state.event_active = True
-                game_state.event_end = time.time() + 60
-                st.toast(f"News Published!", icon="📰")
-                st.rerun()
+            if news_to_trigger != "None":
+                selected_news = next((news for news in PRE_BUILT_NEWS if news["headline"] == news_to_trigger), None)
+                if selected_news:
+                    game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {selected_news['headline']}")
+                    if len(game_state.news_feed) > 5: game_state.news_feed.pop()
+                    game_state.event_type = selected_news['impact']
+                    game_state.event_active = True
+                    game_state.event_end = time.time() + 60
+                    st.toast(f"News Published!", icon="📰")
+                    st.rerun()
 
         st.sidebar.markdown("---")
         st.sidebar.subheader("Adjust Player Capital")
@@ -469,6 +486,7 @@ def render_optimizer(holdings):
         else: st.error(performance)
 
 def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False):
+    game_state = get_game_state()
     mid_price = prices.get(symbol, 0)
     if mid_price == 0: return False
 
@@ -492,9 +510,12 @@ def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=Fals
         elif current_qty < 0 and abs(current_qty) >= qty: # Covering a short
             player['capital'] -= cost; player['holdings'][symbol] += qty; trade_executed = True
         if trade_executed and player['holdings'][symbol] == 0: del player['holdings'][symbol]
-
-    if trade_executed: log_transaction(player_name, action, symbol, qty, trade_price, cost, is_algo)
-    elif not is_algo: st.error("Trade failed: Insufficient capital or holdings.")
+    
+    if trade_executed: 
+        game_state.market_sentiment[symbol] = game_state.market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
+        log_transaction(player_name, action, symbol, qty, trade_price, cost, is_algo)
+    elif not is_algo: 
+        st.error("Trade failed: Insufficient capital or holdings.")
     return trade_executed
 
 def log_transaction(player_name, action, symbol, qty, price, total, is_algo=False):
@@ -558,10 +579,19 @@ def run_game_tick(prices):
     game_state = get_game_state()
     if game_state.game_status != "Running": return prices
     
-    if not game_state.event_active and random.random() < 0.01:
-        events = ["Flash Crash", "Bull Rally", "Banking Boost", "Sector Rotation"]
-        game_state.event_type = random.choice(events); game_state.event_active = True
-        game_state.event_end = time.time() + random.randint(30, 60); st.toast(f"⚡ Market Event: {game_state.event_type}!", icon="🎉")
+    # Sentiment Decay
+    for symbol in game_state.market_sentiment:
+        game_state.market_sentiment[symbol] *= 0.95 
+
+    if not game_state.event_active and random.random() < 0.02: # Increased frequency
+        news_item = random.choice(PRE_BUILT_NEWS)
+        game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
+        if len(game_state.news_feed) > 5: game_state.news_feed.pop()
+        game_state.event_type = news_item['impact']
+        game_state.event_active = True
+        game_state.event_end = time.time() + random.randint(30, 60)
+        st.toast(f"⚡ Market Event: {game_state.event_type}!", icon="🎉")
+        
     if game_state.event_active and time.time() >= game_state.event_end:
         game_state.event_active = False; st.info("Market event has ended.")
     if game_state.event_active: prices = apply_event_adjustment(prices, game_state.event_type)
