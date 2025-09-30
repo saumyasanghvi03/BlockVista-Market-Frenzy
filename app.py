@@ -21,7 +21,7 @@ ROUND_DURATION = 20 * 60   # 20 minutes in seconds
 # Define asset symbols
 NIFTY50_SYMBOLS = ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'TCS.NS',
                    'KOTAKBANK.NS', 'SBIN.NS', 'ITC.NS', 'ASIANPAINT.NS', 'AXISBANK.NS']
-CRYPTO_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD']
+CRYPTO_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'DOGE-USD', 'ADA-USD', 'XRP-USD']
 GOLD_SYMBOL = 'GC=F'
 NIFTY_INDEX_SYMBOL = '^NSEI' # yfinance symbol for Nifty 50 Index
 OPTION_SYMBOLS = ['NIFTY_CALL', 'NIFTY_PUT']
@@ -171,19 +171,26 @@ def optimize_portfolio(player_holdings):
 
 def calculate_indicator(indicator, symbol):
     """Calculates the value of a technical indicator for a given symbol."""
-    hist = get_historical_data([symbol], period="1mo")
-    if hist.empty or len(hist) < 10: return None
+    hist = get_historical_data([symbol], period="2mo") # Fetch more data for longer-term indicators
+    if hist.empty or len(hist) < 30: return None
     
     if indicator == "Price Change % (5-day)":
-        if len(hist) < 5: return None
+        if len(hist) < 6: return None
         price_now = hist[symbol].iloc[-1]
         price_then = hist[symbol].iloc[-6]
         return ((price_now - price_then) / price_then) * 100
     
     elif indicator == "SMA Crossover (10/20)":
+        if len(hist) < 20: return None
         sma_10 = hist[symbol].rolling(window=10).mean().iloc[-1]
         sma_20 = hist[symbol].rolling(window=20).mean().iloc[-1]
         return sma_10 - sma_20 # Positive if short SMA is above long SMA (bullish)
+        
+    elif indicator == "Price Change % (30-day)":
+        if len(hist) < 31: return None
+        price_now = hist[symbol].iloc[-1]
+        price_then = hist[symbol].iloc[-31]
+        return ((price_now - price_then) / price_then) * 100
     return None
 
 # --- UI Functions ---
@@ -320,7 +327,7 @@ def render_algo_trading_tab(player_name, player, disabled_status):
     st.subheader("Automated Trading Strategies")
     st.write("Activate an algorithm to trade automatically on your behalf.")
 
-    default_strats = ["Off", "Momentum Trader", "Mean Reversion"]
+    default_strats = ["Off", "Momentum Trader", "Mean Reversion", "Volatility Breakout", "Value Investor"]
     custom_strats = list(player.get('custom_algos', {}).keys())
     all_strats = default_strats + custom_strats
     
@@ -336,9 +343,13 @@ def render_algo_trading_tab(player_name, player, disabled_status):
     player['algo'] = algo_choice
     
     if player['algo'] == "Momentum Trader":
-        st.info("This bot buys assets that have risen and sells those that have fallen.")
+        st.info("This bot buys assets that have risen and sells those that have fallen recently.")
     elif player['algo'] == "Mean Reversion":
-        st.info("This bot buys assets that have fallen and sells those that have risen.")
+        st.info("This bot buys assets that have fallen and sells those that have risen recently, betting on a return to the average.")
+    elif player['algo'] == "Volatility Breakout":
+        st.info("This bot buys an asset if its price moves sharply up or down, betting on continued high volatility.")
+    elif player['algo'] == "Value Investor":
+        st.info("This bot buys assets that have dropped significantly over the past month, betting on a long-term recovery.")
     elif player['algo'] in custom_strats:
         st.info(f"Custom strategy '{player['algo']}' is active.")
 
@@ -347,7 +358,7 @@ def render_algo_trading_tab(player_name, player, disabled_status):
         c1, c2 = st.columns(2)
         with c1:
             algo_name = st.text_input("Strategy Name", key=f"algo_name_{player_name}")
-            indicator = st.selectbox("Indicator", ["Price Change % (5-day)", "SMA Crossover (10/20)"], key=f"indicator_{player_name}")
+            indicator = st.selectbox("Indicator", ["Price Change % (5-day)", "SMA Crossover (10/20)", "Price Change % (30-day)"], key=f"indicator_{player_name}")
             condition = st.selectbox("Condition", ["Greater Than", "Less Than"], key=f"condition_{player_name}")
         with c2:
             threshold = st.number_input("Threshold Value", value=0.0, step=0.1, key=f"threshold_{player_name}")
@@ -534,24 +545,39 @@ def run_game_tick(prices):
 
 def run_algo_strategies(prices):
     game_state = get_game_state()
-    if not game_state.price_history: return
-    prev_prices = game_state.price_history[-1]
+    if len(game_state.price_history) < 2: return
+    prev_prices = game_state.price_history[-2] # Use the second to last price for change calculation
     
     for name, player in game_state.players.items():
         active_algo = player.get('algo', 'Off')
         if active_algo == 'Off': continue
 
         trade_symbol = random.choice(NIFTY50_SYMBOLS + CRYPTO_SYMBOLS)
-        price_change = prices[trade_symbol] - prev_prices.get(trade_symbol, prices[trade_symbol])
         
-        if active_algo == "Momentum Trader" and abs(price_change) > 0.1:
-            action = "Buy" if price_change > 0 else "Sell"
-            execute_trade(name, player, action, trade_symbol, 1, prices, is_algo=True)
+        # --- Default Algos ---
+        if active_algo == "Momentum Trader":
+            price_change = prices[trade_symbol] - prev_prices.get(trade_symbol, prices[trade_symbol])
+            if abs(price_change / prices[trade_symbol]) > 0.001: # Threshold for momentum
+                action = "Buy" if price_change > 0 else "Sell"
+                execute_trade(name, player, action, trade_symbol, 1, prices, is_algo=True)
                 
-        elif active_algo == "Mean Reversion" and abs(price_change) > 0.1:
-            action = "Sell" if price_change > 0 else "Buy"
-            execute_trade(name, player, action, trade_symbol, 1, prices, is_algo=True)
+        elif active_algo == "Mean Reversion":
+            price_change = prices[trade_symbol] - prev_prices.get(trade_symbol, prices[trade_symbol])
+            if abs(price_change / prices[trade_symbol]) > 0.001:
+                action = "Sell" if price_change > 0 else "Buy"
+                execute_trade(name, player, action, trade_symbol, 1, prices, is_algo=True)
         
+        elif active_algo == "Volatility Breakout":
+            price_change_pct = ((prices[trade_symbol] - prev_prices.get(trade_symbol, prices[trade_symbol])) / prices[trade_symbol]) * 100
+            if abs(price_change_pct) > 0.1: # If price moves more than 0.1% in a tick
+                execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
+
+        elif active_algo == "Value Investor":
+            change_30_day = calculate_indicator("Price Change % (30-day)", trade_symbol)
+            if change_30_day is not None and change_30_day < -10: # If down more than 10% in a month
+                execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
+        
+        # --- Custom Algos ---
         elif active_algo in player.get('custom_algos', {}):
             strategy = player['custom_algos'][active_algo]
             indicator_val = calculate_indicator(strategy['indicator'], trade_symbol)
