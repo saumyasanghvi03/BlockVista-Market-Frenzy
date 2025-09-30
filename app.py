@@ -96,10 +96,13 @@ def simulate_market_prices(base_prices):
     game_state = get_game_state()
     simulated_prices = base_prices.copy()
     
+    # Safely get volatility_multiplier, defaulting to 1.0 if it doesn't exist
+    volatility_multiplier = getattr(game_state, 'volatility_multiplier', 1.0)
+    
     # Apply sentiment and volatility
     for symbol in simulated_prices:
         sentiment = game_state.market_sentiment.get(symbol, 0)
-        volatility_noise = random.uniform(-0.001, 0.001) * game_state.volatility_multiplier
+        volatility_noise = random.uniform(-0.001, 0.001) * volatility_multiplier
         price_multiplier = 1 + (sentiment * 0.005) + volatility_noise
         simulated_prices[symbol] *= price_multiplier
     
@@ -231,7 +234,7 @@ def render_sidebar():
         game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=int(game_state.round_duration_seconds/60), disabled=(game_state.game_status == "Running"))
 
         # Volatility Control
-        game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, game_state.volatility_multiplier, 0.5)
+        game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, getattr(game_state, 'volatility_multiplier', 1.0), 0.5)
 
         # Manual Event Trigger
         event_to_trigger = st.sidebar.selectbox("Trigger Market Event", ["None", "Flash Crash", "Bull Rally", "Banking Boost", "Sector Rotation"])
@@ -518,19 +521,17 @@ def run_game_tick(prices):
 
 def handle_futures_expiry(prices):
     game_state = get_game_state()
-    if not game_state.futures_settled and time.time() > game_state.futures_expiry_time:
+    if not game_state.futures_settled and game_state.futures_expiry_time > 0 and time.time() > game_state.futures_expiry_time:
         st.warning("FUTURES EXPIRED! All open futures positions are being cash-settled.")
         settlement_prices = { 'NIFTY-FUT': prices.get(NIFTY_INDEX_SYMBOL), 'BANKNIFTY-FUT': prices.get(BANKNIFTY_INDEX_SYMBOL) }
-        for player in game_state.players.values():
+        for name, player in game_state.players.items():
             for symbol in FUTURES_SYMBOLS:
                 if symbol in player['holdings']:
                     qty = player['holdings'][symbol]
                     settlement_price = settlement_prices.get(symbol, 0)
-                    # For simplicity, assume entry cost was tracked elsewhere or is zero for this settlement logic
-                    # A more robust system would track average entry price. Here we just close the position.
                     pnl = (settlement_price - prices.get(symbol, 0)) * qty # Simplified PnL
                     player['capital'] += pnl
-                    log_transaction(player['name'], "Futures Settlement", symbol, qty, settlement_price, pnl)
+                    log_transaction(name, "Futures Settlement", symbol, qty, settlement_price, pnl)
                     del player['holdings'][symbol]
         game_state.futures_settled = True
 
@@ -576,4 +577,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
