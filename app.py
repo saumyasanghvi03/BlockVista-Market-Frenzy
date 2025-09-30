@@ -286,7 +286,7 @@ def render_trade_execution_panel(prices):
         c2.metric("Portfolio Value", format_indian_currency(total_value))
         c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow} {pnl/INITIAL_CAPITAL:.2%}")
 
-        tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Holdings & History", "📊 Strategy & Insights"]
+        tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Transaction History", "📊 Strategy & Insights"]
         tab1, tab2, tab3, tab4 = st.tabs(tabs)
         is_game_running = game_state.game_status == "Running"
 
@@ -295,33 +295,43 @@ def render_trade_execution_panel(prices):
         with tab2:
             render_algo_trading_tab(acting_player, player, is_game_running)
         with tab3:
-            render_holdings_and_history(acting_player, player, prices)
+            render_transaction_history(acting_player)
         with tab4:
             render_strategy_tab(player)
 
 def render_trade_interface(player_name, player, prices, disabled_status):
-    st.subheader("Market Order")
-    col1, col2 = st.columns([2,1])
-    with col1:
-        asset_type = st.radio("Asset Type", ["Stock", "Crypto", "Gold", "Option"], horizontal=True, key=f"asset_{player_name}", disabled=not disabled_status)
-        if asset_type == "Stock":
-            symbols = [s.replace('.NS', '') for s in NIFTY50_SYMBOLS]
-            symbol_choice = st.selectbox("Stock", symbols, key=f"stock_{player_name}", disabled=not disabled_status) + '.NS'
-        elif asset_type == "Crypto":
-            symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"crypto_{player_name}", disabled=not disabled_status)
-        elif asset_type == "Gold": symbol_choice = GOLD_SYMBOL
-        else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"option_{player_name}", disabled=not disabled_status)
+    with st.container(border=True):
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            asset_type = st.radio("Asset Type", ["Stock", "Crypto", "Gold", "Option"], horizontal=True, key=f"asset_{player_name}", disabled=disabled_status)
+            if asset_type == "Stock":
+                symbols = [s.replace('.NS', '') for s in NIFTY50_SYMBOLS]
+                symbol_choice = st.selectbox("Stock", symbols, key=f"stock_{player_name}", disabled=disabled_status) + '.NS'
+            elif asset_type == "Crypto":
+                symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"crypto_{player_name}", disabled=disabled_status)
+            elif asset_type == "Gold": symbol_choice = GOLD_SYMBOL
+            else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"option_{player_name}", disabled=disabled_status)
         
+        with col2:
+            qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"qty_{player_name}", disabled=disabled_status)
+
         current_price = prices.get(symbol_choice, 0)
-        st.info(f"Current Price of {symbol_choice}: {format_indian_currency(current_price)}")
+        estimated_cost = current_price * qty
+        st.info(f"Current Price: {format_indian_currency(current_price)} | Estimated Cost: {format_indian_currency(estimated_cost)}")
         
-    with col2:
-        qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"qty_{player_name}", disabled=not disabled_status)
-        action = st.radio("Action", ["Buy", "Sell", "Short"], key=f"action_{player_name}", disabled=not disabled_status)
-    
-    if st.button("Place Trade", key=f"trade_btn_{player_name}", type="primary", disabled=not disabled_status, use_container_width=True):
-        execute_trade(player_name, player, action, symbol_choice, qty, prices)
-        st.rerun()
+        b1, b2, b3 = st.columns(3)
+        if b1.button(f"Buy {qty} {symbol_choice.split('-')[0].split('.')[0]}", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"):
+            execute_trade(player_name, player, "Buy", symbol_choice, qty, prices)
+            st.rerun()
+        if b2.button(f"Sell {qty} {symbol_choice.split('-')[0].split('.')[0]}", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status):
+            execute_trade(player_name, player, "Sell", symbol_choice, qty, prices)
+            st.rerun()
+        if b3.button(f"Short {qty} {symbol_choice.split('-')[0].split('.')[0]}", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status):
+            execute_trade(player_name, player, "Short", symbol_choice, qty, prices)
+            st.rerun()
+            
+    st.markdown("---")
+    render_current_holdings(player, prices)
 
 def render_algo_trading_tab(player_name, player, disabled_status):
     st.subheader("Automated Trading Strategies")
@@ -337,7 +347,7 @@ def render_algo_trading_tab(player_name, player, disabled_status):
         "Choose Strategy",
         all_strats,
         index=all_strats.index(active_algo) if active_algo in all_strats else 0,
-        disabled=not disabled_status,
+        disabled=disabled_status,
         key=f"algo_{player_name}"
     )
     player['algo'] = algo_choice
@@ -375,20 +385,21 @@ def render_algo_trading_tab(player_name, player, disabled_status):
             else:
                 st.error("Strategy name cannot be empty.")
 
-def render_holdings_and_history(player_name, player, prices):
-    st.subheader("Current Holdings")
+def render_current_holdings(player, prices):
+    st.subheader("💼 Current Holdings")
     if player['holdings']:
         holdings_data = [{"Symbol": sym, "Quantity": qty, "Value": prices.get(sym, 0) * qty} for sym, qty in player['holdings'].items()]
         holdings_df = pd.DataFrame(holdings_data)
-        st.dataframe(holdings_df.style.format(formatter={"Value": format_indian_currency}))
+        st.dataframe(holdings_df.style.format(formatter={"Value": format_indian_currency}), use_container_width=True)
     else:
         st.info("No holdings yet.")
         
+def render_transaction_history(player_name):
     game_state = get_game_state()
     st.subheader("Transaction History")
     if game_state.transactions.get(player_name):
         trans_df = pd.DataFrame(game_state.transactions[player_name], columns=["Time", "Action", "Symbol", "Qty", "Price", "Total"])
-        st.dataframe(trans_df.style.format(formatter={"Price": format_indian_currency, "Total": format_indian_currency}))
+        st.dataframe(trans_df.style.format(formatter={"Price": format_indian_currency, "Total": format_indian_currency}), use_container_width=True)
     else:
         st.info("No transactions recorded.")
 
@@ -654,3 +665,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
