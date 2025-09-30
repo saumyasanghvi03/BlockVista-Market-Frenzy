@@ -428,33 +428,33 @@ def render_trade_execution_panel(prices):
 
             tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Transaction History", "📊 Strategy & Insights"]
             tab1, tab2, tab3, tab4 = st.tabs(tabs)
-            is_game_running = game_state.game_status == "Running"
+            is_trade_disabled = game_state.game_status != "Running"
 
-            with tab1: render_trade_interface(acting_player, player, prices, is_game_running)
-            with tab2: render_algo_trading_tab(acting_player, player, is_game_running)
+            with tab1: render_trade_interface(acting_player, player, prices, is_trade_disabled)
+            with tab2: render_algo_trading_tab(acting_player, player, is_trade_disabled)
             with tab3: render_transaction_history(acting_player)
             with tab4: render_strategy_tab(player)
 
-def render_trade_interface(player_name, player, prices, disabled_status):
+def render_trade_interface(player_name, player, prices, disabled):
     order_type_tabs = ["Market", "Limit", "Stop-Loss"]
     market_tab, limit_tab, stop_loss_tab = st.tabs(order_type_tabs)
 
     with market_tab:
-        render_market_order_ui(player_name, player, prices, disabled_status)
+        render_market_order_ui(player_name, player, prices, disabled)
 
     with limit_tab:
-        render_limit_order_ui(player_name, player, prices, disabled_status)
+        render_limit_order_ui(player_name, player, prices, disabled)
     
     with stop_loss_tab:
-        render_stop_loss_order_ui(player_name, player, prices, disabled_status)
+        render_stop_loss_order_ui(player_name, player, prices, disabled)
 
     st.markdown("---")
     render_current_holdings(player, prices)
     render_pending_orders(player)
 
-def render_market_order_ui(player_name, player, prices, disabled_status):
+def render_market_order_ui(player_name, player, prices, disabled):
     asset_types = ["Stock", "Crypto", "Gold", "Futures", "Leveraged ETF", "Option"]
-    asset_type = st.radio("Asset Type", asset_types, horizontal=True, key=f"market_asset_{player_name}", disabled=disabled_status)
+    asset_type = st.radio("Asset Type", asset_types, horizontal=True, key=f"market_asset_{player_name}", disabled=disabled)
     
     if asset_type == "Futures" and getattr(get_game_state(), 'futures_expiry_time', 0) > 0:
         expiry_remaining = max(0, get_game_state().futures_expiry_time - time.time())
@@ -462,14 +462,14 @@ def render_market_order_ui(player_name, player, prices, disabled_status):
 
     col1, col2 = st.columns([2, 1])
     with col1:
-        if asset_type == "Stock": symbol_choice = st.selectbox("Stock", [s.replace('.NS', '') for s in NIFTY50_SYMBOLS], key=f"market_stock_{player_name}", disabled=disabled_status) + '.NS'
-        elif asset_type == "Crypto": symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"market_crypto_{player_name}", disabled=disabled_status)
+        if asset_type == "Stock": symbol_choice = st.selectbox("Stock", [s.replace('.NS', '') for s in NIFTY50_SYMBOLS], key=f"market_stock_{player_name}", disabled=disabled) + '.NS'
+        elif asset_type == "Crypto": symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"market_crypto_{player_name}", disabled=disabled)
         elif asset_type == "Gold": symbol_choice = GOLD_SYMBOL
-        elif asset_type == "Futures": symbol_choice = st.selectbox("Futures", FUTURES_SYMBOLS, key=f"market_futures_{player_name}", disabled=disabled_status)
-        elif asset_type == "Leveraged ETF": symbol_choice = st.selectbox("Leveraged ETF", LEVERAGED_ETFS, key=f"market_letf_{player_name}", disabled=disabled_status)
-        else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"market_option_{player_name}", disabled=disabled_status)
+        elif asset_type == "Futures": symbol_choice = st.selectbox("Futures", FUTURES_SYMBOLS, key=f"market_futures_{player_name}", disabled=disabled)
+        elif asset_type == "Leveraged ETF": symbol_choice = st.selectbox("Leveraged ETF", LEVERAGED_ETFS, key=f"market_letf_{player_name}", disabled=disabled)
+        else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"market_option_{player_name}", disabled=disabled)
     with col2:
-        qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"market_qty_{player_name}", disabled=disabled_status)
+        qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"market_qty_{player_name}", disabled=disabled)
     
     mid_price = prices.get(symbol_choice, 0)
     ask_price = mid_price * (1 + BID_ASK_SPREAD / 2)
@@ -477,25 +477,25 @@ def render_market_order_ui(player_name, player, prices, disabled_status):
     st.info(f"Bid: {format_indian_currency(bid_price)} | Ask: {format_indian_currency(ask_price)}")
 
     b1, b2, b3 = st.columns(3)
-    if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"): 
+    if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled, type="primary"): 
         if execute_trade(player_name, player, "Buy", symbol_choice, qty, prices): play_sound('success')
         else: play_sound('error')
         st.rerun()
-    if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status): 
+    if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled): 
         if execute_trade(player_name, player, "Sell", symbol_choice, qty, prices): play_sound('success')
         else: play_sound('error')
         st.rerun()
-    if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status): 
+    if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled): 
         if execute_trade(player_name, player, "Short", symbol_choice, qty, prices): play_sound('success')
         else: play_sound('error')
         st.rerun()
 
-def render_limit_order_ui(player_name, player, prices, disabled_status):
+def render_limit_order_ui(player_name, player, prices, disabled):
     st.write("Set a price to automatically buy or sell an asset.")
     # UI for Limit order
     pass # Placeholder for Limit Order UI
 
-def render_stop_loss_order_ui(player_name, player, prices, disabled_status):
+def render_stop_loss_order_ui(player_name, player, prices, disabled):
     st.write("Set a price to automatically sell an asset if it drops, to limit losses.")
     # UI for Stop-Loss order
     pass # Placeholder for Stop-Loss Order UI
@@ -508,12 +508,12 @@ def render_pending_orders(player):
     else:
         st.info("No pending orders.")
 
-def render_algo_trading_tab(player_name, player, disabled_status):
+def render_algo_trading_tab(player_name, player, disabled):
     st.subheader("Automated Trading Strategies")
     default_strats = ["Off", "Momentum Trader", "Mean Reversion", "Volatility Breakout", "Value Investor"]
     custom_strats = list(player.get('custom_algos', {}).keys()); all_strats = default_strats + custom_strats
     active_algo = player.get('algo', 'Off')
-    player['algo'] = st.selectbox("Choose Strategy", all_strats, index=all_strats.index(active_algo) if active_algo in all_strats else 0, disabled=disabled_status, key=f"algo_{player_name}")
+    player['algo'] = st.selectbox("Choose Strategy", all_strats, index=all_strats.index(active_algo) if active_algo in all_strats else 0, disabled=disabled, key=f"algo_{player_name}")
     
     if player['algo'] in default_strats and player['algo'] != 'Off': st.info("Default strategy description...")
 
