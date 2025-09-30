@@ -8,15 +8,12 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 import io
-import requests  # Added for BlockVista API integration
+import requests  # Retained for Alpha Vantage API integration
 from typing import Dict, Any
 
-# --- BlockVista API Configuration ---
-# Replace with your actual BlockVista API details
-BLOCKVISTA_API_URL = "https://api.blockvista.com/v1"  # Example base URL
-BLOCKVISTA_API_KEY = st.secrets.get("BLOCKVISTA_API_KEY", "your_api_key_here")  # Store in Streamlit secrets
-SYMBOLS_FOR_API = ['RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS',
-                   'KOTAKBANK', 'SBIN', 'ITC', 'ASIANPAINT', 'AXISBANK']  # Without .NS for API
+# --- Alpha Vantage API Configuration ---
+# Get your free API key from https://www.alphavantage.co/support/#api-key
+ALPHA_VANTAGE_API_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "YOUR_API_KEY")
 
 # --- Game Config ---
 GAME_NAME = "BlockVista Market Frenzy"
@@ -24,7 +21,7 @@ INITIAL_CAPITAL = 1000000  # ₹10 lakh
 ROUND_DURATION = 20 * 60   # 20 minutes in seconds
 NIFTY50_SYMBOLS = ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'TCS.NS',
                    'KOTAKBANK.NS', 'SBIN.NS', 'ITC.NS', 'ASIANPAINT.NS', 'AXISBANK.NS']
-GOLD_SYMBOL = 'GC=F'  # Gold futures (fallback to yf if not in BlockVista)
+GOLD_SYMBOL = 'GC=F'  # Gold futures
 OPTION_SYMBOLS = ['NIFTY_CALL', 'NIFTY_PUT']  # Mock options (extend API if supported)
 LIQUIDITY_LEVELS = {sym: random.uniform(0.5, 1.0) for sym in NIFTY50_SYMBOLS + [GOLD_SYMBOL] + OPTION_SYMBOLS}
 SLIPPAGE_THRESHOLD = 10  # Qty threshold for slippage
@@ -41,37 +38,43 @@ QUIZ_QUESTIONS = [
     {"question": "What is short-selling?", "options": ["Buying low, selling high", "Selling borrowed shares", "Holding for dividends"], "answer": 1},
 ]
 
-# --- Fetch Live Prices from BlockVista API ---
+# --- Fetch Live Prices from yfinance & Alpha Vantage ---
 @st.cache_data(ttl=60)
 def get_live_prices():
     prices = {}
+    
+    # 1. Fetch Nifty50 stocks and Gold using yfinance (more reliable for batch requests)
     try:
-        # BlockVista API Call for Nifty50
-        headers = {"Authorization": f"Bearer {BLOCKVISTA_API_KEY}"}
-        params = {"symbols": ",".join(SYMBOLS_FOR_API), "exchange": "NSE"}
-        response = requests.get(f"{BLOCKVISTA_API_URL}/prices", headers=headers, params=params, timeout=10)
-        if response.status_code == 200:
-            api_data = response.json()
-            # Assume API returns {'data': {'RELIANCE': {'price': 2500.0}, ...}}
-            for symbol, data in api_data.get('data', {}).items():
-                prices[f"{symbol}.NS"] = data.get('price', random.uniform(1000, 3500))
-            st.success("Fetched live prices from BlockVista API!")  # Optional notification
+        data = yf.download(tickers=NIFTY50_SYMBOLS + [GOLD_SYMBOL], period='1d', interval='1m')
+        if not data.empty:
+            # Get the most recent price available
+            latest_prices = data['Close'].iloc[-1]
+            prices.update(latest_prices.to_dict())
+            st.success("Fetched stock and gold prices from yfinance!")
         else:
-            st.warning(f"BlockVista API error ({response.status_code}). Falling back to yfinance.")
+            raise ValueError("yfinance returned no data.")
     except Exception as e:
-        st.warning(f"BlockVista API unavailable: {e}. Falling back to yfinance.")
-    
-    # Fallback to yfinance for missing symbols (e.g., Gold, Options, Nifty Index)
-    fallback_symbols = [s for s in [GOLD_SYMBOL, '^NSEI'] if s not in prices]
-    for symbol in fallback_symbols:
-        try:
-            data = yf.Ticker(symbol).info
-            prices[symbol] = data.get('regularMarketPrice') or data.get('previousClose') or random.uniform(1000, 3500)
-        except:
+        st.warning(f"yfinance unavailable: {e}. Falling back to random data for stocks/gold.")
+        for symbol in NIFTY50_SYMBOLS + [GOLD_SYMBOL]:
             prices[symbol] = random.uniform(1000, 3500)
-    
-    # Mock options based on Nifty (extend with BlockVista options endpoint if available)
-    nifty_price = prices.get('^NSEI', 100)
+
+    # 2. Fetch Nifty Index (^NSEI) using Alpha Vantage
+    try:
+        url = f'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=^NSEI&apikey={ALPHA_VANTAGE_API_KEY}'
+        r = requests.get(url)
+        data = r.json()
+        nifty_price = float(data.get('Global Quote', {}).get('05. price', 0))
+        if nifty_price > 0:
+            prices['^NSEI'] = nifty_price
+            st.success("Fetched Nifty Index from Alpha Vantage!")
+        else:
+             raise ValueError("Alpha Vantage returned no price data for Nifty.")
+    except Exception as e:
+        st.warning(f"Alpha Vantage unavailable for Nifty Index: {e}. Using fallback.")
+        prices['^NSEI'] = random.uniform(20000, 22000)
+
+    # 3. Mock options based on Nifty price
+    nifty_price = prices.get('^NSEI', 21000) # Use a sensible default if fetch failed
     prices['NIFTY_CALL'] = nifty_price * 1.02
     prices['NIFTY_PUT'] = nifty_price * 0.98
     
@@ -108,7 +111,8 @@ def apply_event_adjustment(prices, event_type, liquidity_adjust=False):
                 LIQUIDITY_LEVELS[sym] *= 1.3
     elif event_type == "Banking Boost":
         for sym in ['HDFCBANK.NS', 'ICICIBANK.NS', 'KOTAKBANK.NS', 'SBIN.NS', 'AXISBANK.NS']:
-            adjusted_prices[sym] *= 1.07
+            if sym in adjusted_prices:
+                adjusted_prices[sym] *= 1.07
     elif event_type == "Earnings Surprise":
         surprise_sym = random.choice(list(adjusted_prices.keys()))
         multiplier = random.choice([1.2, 0.8])
@@ -121,23 +125,27 @@ def apply_event_adjustment(prices, event_type, liquidity_adjust=False):
                 LIQUIDITY_LEVELS[sym] *= 0.75
     elif event_type == "Meme Stock Pump":
         for sym in ['INFY.NS', 'TCS.NS']:
-            adjusted_prices = apply_volatility_spike(adjusted_prices, sym, 1.25)
+            if sym in adjusted_prices:
+                adjusted_prices = apply_volatility_spike(adjusted_prices, sym, 1.25)
         st.warning("🔥 Meme frenzy in Tech stocks!")
     elif event_type == "Halt Trading":
         st.error("⏸️ Trading Halted for 30s! Prices frozen.")
         return prices, 30  # Freeze prices
     elif event_type == "Regulatory Crackdown":  # New: Options hit hard
         for sym in OPTION_SYMBOLS:
-            adjusted_prices[sym] *= 0.85
-            LIQUIDITY_LEVELS[sym] *= 0.6
+            if sym in adjusted_prices:
+                adjusted_prices[sym] *= 0.85
+                LIQUIDITY_LEVELS[sym] *= 0.6
         st.warning("🚨 Regulatory Crackdown on Options!")
     elif event_type == "Sector Rotation":  # New: Shift between sectors
         old_sector = ['HDFCBANK.NS', 'ICICIBANK.NS']
         new_sector = ['INFY.NS', 'TCS.NS']
         for sym in old_sector:
-            adjusted_prices[sym] *= 0.95
+            if sym in adjusted_prices:
+                adjusted_prices[sym] *= 0.95
         for sym in new_sector:
-            adjusted_prices[sym] *= 1.10
+            if sym in adjusted_prices:
+                adjusted_prices[sym] *= 1.10
         st.info("🔄 Sector Rotation: Out of Banking, into Tech!")
     return adjusted_prices, event_duration
 
@@ -206,14 +214,19 @@ st.markdown(f"<div class='timer'>Time Remaining: {remaining_time // 60} min {rem
 # Update prices
 prices = get_live_prices()
 if st.session_state.event_active and time.time() < st.session_state.event_end:
-    prices, _ = apply_event_adjustment(prices, st.session_state.event_type, liquidity_adjust=True)
+    # Pass a copy to avoid modifying the original dict during iteration
+    current_prices = st.session_state.prices.copy()
+    prices, _ = apply_event_adjustment(current_prices, st.session_state.event_type, liquidity_adjust=True)
 st.session_state.prices = prices
 
-st.markdown("<div class='section'>Live Market Prices (via BlockVista API)</div>", unsafe_allow_html=True)
+st.markdown("<div class='section'>Live Market Prices (via yfinance & Alpha Vantage)</div>", unsafe_allow_html=True)
 price_df = pd.DataFrame.from_dict(prices, orient='index', columns=['Price']).sort_index()
 price_df['Liquidity'] = pd.Series(LIQUIDITY_LEVELS).reindex(price_df.index)
 price_df['Volatility'] = pd.Series(VOLATILITY_BASE).reindex(price_df.index)
+# Fill NA values for symbols that might fail to fetch
+price_df.fillna(0, inplace=True)
 st.dataframe(price_df.style.format({"Price": "{:.2f}", "Liquidity": "{:.2f}", "Volatility": "{:.2f}"}))
+
 
 # Liquidity Explanation
 if not st.session_state.liquidity_shown:
