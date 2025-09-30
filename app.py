@@ -42,7 +42,9 @@ PRE_BUILT_NEWS = [
     {"headline": "Breaking: RBI unexpectedly cuts repo rate by 25 basis points!", "impact": "Bull Rally"},
     {"headline": "Disappointing quarterly results from major IT firms weigh on the market.", "impact": "Flash Crash"},
     {"headline": "Government announces major infrastructure spending package, boosting banking stocks.", "impact": "Banking Boost"},
-    {"headline": "Geopolitical tensions rise in the Middle East, causing market uncertainty.", "impact": "Flash Crash"},
+    {"headline": "Shocking fraud uncovered at a major private bank, sending shockwaves through the financial sector.", "impact": "Flash Crash"},
+    {"headline": "Indian tech firm announces breakthrough in AI, sparking a rally in tech stocks.", "impact": "Sector Rotation"},
+    {"headline": "Government unexpectedly announces a ban on all private cryptocurrencies.", "impact": "Flash Crash"},
     {"headline": "FIIs show renewed interest in Indian equities, leading to broad-based buying.", "impact": "Bull Rally"},
     {"headline": "New regulations announced for the tech sector; investors react cautiously.", "impact": "Sector Rotation"},
     {"headline": "Fed Chair Jerome Powell: 'Good Morning, the economy is resilient, but we remain watchful.'", "impact": "Volatility Spike"},
@@ -115,8 +117,10 @@ def announce_news(headline):
     safe_headline = headline.replace("'", "\\'").replace("\n", " ")
     js = f"""
     <script>
-        const utterance = new SpeechSynthesisUtterance('{safe_headline}');
-        speechSynthesis.speak(utterance);
+        if ('speechSynthesis' in window) {{
+            const utterance = new SpeechSynthesisUtterance('{safe_headline}');
+            speechSynthesis.speak(utterance);
+        }}
     </script>
     """
     st.components.v1.html(js, height=0)
@@ -311,8 +315,11 @@ def render_sidebar():
         st.sidebar.markdown("---")
         st.sidebar.subheader("Broadcast News")
         
-        news_options = [news['headline'] for news in PRE_BUILT_NEWS]
-        news_to_trigger = st.sidebar.selectbox("Select News to Publish", ["None"] + news_options)
+        news_options = {news['headline']: news['impact'] for news in PRE_BUILT_NEWS}
+        news_to_trigger = st.sidebar.selectbox("Select News to Publish", ["None"] + list(news_options.keys()))
+
+        if news_to_trigger != "None":
+            st.sidebar.info(f"Impact: {news_options[news_to_trigger]}")
 
         if st.sidebar.button("Publish News"):
             if news_to_trigger != "None":
