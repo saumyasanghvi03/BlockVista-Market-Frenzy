@@ -94,7 +94,6 @@ def get_daily_base_prices():
     except Exception:
         for symbol in yf_symbols: # Full fallback on API error
             prices[symbol] = random.uniform(10, 50000)
-    st.toast("Fetched daily base market prices.")
     return prices
 
 def simulate_tick_prices(last_prices):
@@ -629,6 +628,7 @@ def main():
     # Fetch base prices only if they haven't been fetched for the day
     if not game_state.base_real_prices:
         game_state.base_real_prices = get_daily_base_prices()
+        st.toast("Fetched daily base market prices.")
 
     # Use the last known price or the daily base price to start the tick simulation
     last_prices = game_state.prices if game_state.prices else game_state.base_real_prices
