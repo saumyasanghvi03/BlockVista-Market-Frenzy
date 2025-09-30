@@ -15,14 +15,14 @@ from typing import Dict, Any
 # Replace with your actual BlockVista API details
 BLOCKVISTA_API_URL = "https://api.blockvista.com/v1"  # Example base URL
 BLOCKVISTA_API_KEY = st.secrets.get("BLOCKVISTA_API_KEY", "your_api_key_here")  # Store in Streamlit secrets
-SYMBOLS_FOR_API = ['RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 
+SYMBOLS_FOR_API = ['RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS',
                    'KOTAKBANK', 'SBIN', 'ITC', 'ASIANPAINT', 'AXISBANK']  # Without .NS for API
 
 # --- Game Config ---
 GAME_NAME = "BlockVista Market Frenzy"
 INITIAL_CAPITAL = 1000000  # ₹10 lakh
 ROUND_DURATION = 20 * 60   # 20 minutes in seconds
-NIFTY50_SYMBOLS = ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'TCS.NS', 
+NIFTY50_SYMBOLS = ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'TCS.NS',
                    'KOTAKBANK.NS', 'SBIN.NS', 'ITC.NS', 'ASIANPAINT.NS', 'AXISBANK.NS']
 GOLD_SYMBOL = 'GC=F'  # Gold futures (fallback to yf if not in BlockVista)
 OPTION_SYMBOLS = ['NIFTY_CALL', 'NIFTY_PUT']  # Mock options (extend API if supported)
@@ -125,7 +125,7 @@ def apply_event_adjustment(prices, event_type, liquidity_adjust=False):
         st.warning("🔥 Meme frenzy in Tech stocks!")
     elif event_type == "Halt Trading":
         st.error("⏸️ Trading Halted for 30s! Prices frozen.")
-        return prices  # Freeze prices
+        return prices, 30  # Freeze prices
     elif event_type == "Regulatory Crackdown":  # New: Options hit hard
         for sym in OPTION_SYMBOLS:
             adjusted_prices[sym] *= 0.85
@@ -258,8 +258,8 @@ if player_list:
     # Transaction History
     if st.session_state.transactions.get(selected_player):
         st.markdown("<div class='section'>Transaction History</div>", unsafe_allow_html=True)
-        trans_df = pd.DataFrame(st.session_state.transactions[selected_player], 
-                               columns=["Time", "Action", "Symbol", "Qty", "Price", "Total"])
+        trans_df = pd.DataFrame(st.session_state.transactions[selected_player],
+                                columns=["Time", "Action", "Symbol", "Qty", "Price", "Total"])
         st.dataframe(trans_df.style.format({"Price": "{:.2f}", "Total": "{:.2f}"}))
 
     # Portfolio Metrics
@@ -281,8 +281,8 @@ if player_list:
         st.error(f"⚠️ Margin Call! Portfolio value (₹{total_value:.2f}) below required margin (₹{margin_needed:.2f}). Liquidate positions! (Call #{player['margin_calls']})")
     
     # Trade Entry
-    action = st.radio("Action", ["Buy", "Sell", "Short"], key="action_select")
-    asset_type = st.radio("Asset Type", ["Stock", "Gold", "Option"], key="asset_select")
+    action = st.radio("Action", ["Buy", "Sell", "Short"], key="action_select", horizontal=True)
+    asset_type = st.radio("Asset Type", ["Stock", "Gold", "Option"], key="asset_select", horizontal=True)
     leverage_toggle = st.checkbox("Use 2x Leverage (VIP Only)", value=player['leverage'] == 2.0, disabled=player['mode'] != "VIP Guest", key="leverage_toggle")
     if leverage_toggle and player['mode'] == "VIP Guest":
         player['leverage'] = 2.0
@@ -354,13 +354,16 @@ st.dataframe(lb_df.style.format({"Portfolio Value": "{:.2f}", "P&L": "{:.2f}"}))
 if remaining_time <= 0:
     st.balloons()
     st.markdown("<div class='section'>Round Over! Winners:</div>", unsafe_allow_html=True)
-    for i, row in lb_df.head(3).iterrows():
-        st.markdown(f"<div class='winner'>{i+1}. {row['Player']} ({row['Mode']}): ₹{row['Portfolio Value']:.2f}</div>", unsafe_allow_html=True)
+    # Reset index to start from 1 for ranking
+    winner_df = lb_df.head(3).reset_index(drop=True)
+    winner_df.index += 1
+    for i, row in winner_df.iterrows():
+        st.markdown(f"<div class='winner'>{i}. {row['Player']} ({row['Mode']}): ₹{row['Portfolio Value']:.2f}</div>", unsafe_allow_html=True)
 
 # --- Special Market Events ---
 if random.random() < 0.02 and not st.session_state.event_active:
-    events = ["Flash Crash", "Bull Rally", "Banking Boost", "Earnings Surprise", 
-              "Geopolitical Tension", "Meme Stock Pump", "Halt Trading", 
+    events = ["Flash Crash", "Bull Rally", "Banking Boost", "Earnings Surprise",
+              "Geopolitical Tension", "Meme Stock Pump", "Halt Trading",
               "Regulatory Crackdown", "Sector Rotation"]
     event_type = random.choice(events)
     st.warning(f"⚡ Market Event: {event_type}! Prices & liquidity adjusted!")
@@ -380,9 +383,9 @@ if random.random() < 0.005 and not st.session_state.quiz_triggered and 'selected
     quiz = random.choice(QUIZ_QUESTIONS)
     with st.expander("📚 Quick Quiz! Answer for Bonus Capital", expanded=True):
         st.markdown(f"<div class='quiz'>{quiz['question']}</div>", unsafe_allow_html=True)
-        answer = st.radio("Options:", quiz["options"], key="quiz_answer")
+        answer = st.radio("Options:", quiz["options"], key="quiz_answer", index=None)
         if st.button("Submit Answer"):
-            if quiz["options"].index(answer) == quiz["answer"]:
+            if answer and quiz["options"].index(answer) == quiz["answer"]:
                 bonus = random.randint(10000, 50000)
                 player['capital'] += bonus
                 st.success(f"Correct! +₹{bonus} bonus.")
@@ -391,10 +394,12 @@ if random.random() < 0.005 and not st.session_state.quiz_triggered and 'selected
                 ])
             else:
                 st.error("Incorrect. Try next time!")
-            st.session_state.quiz_triggered = True
-else:
-    st.session_state.quiz_triggered = False
+            st.session_state.quiz_triggered = True # Prevent immediate re-trigger
+# Reset trigger for next round
+elif st.session_state.quiz_triggered and random.random() > 0.95:
+     st.session_state.quiz_triggered = False
 
 # Auto-refresh
 time.sleep(1)
 st.rerun()
+
