@@ -49,7 +49,6 @@ class GameState:
         self.prices = {}
         self.price_history = []
         self.transactions = {}
-        self.market_sentiment = {s: 0 for s in ALL_SYMBOLS}
         self.liquidity = {s: random.uniform(0.5, 1.0) for s in ALL_SYMBOLS}
         self.event_active = False
         self.event_type = None
@@ -75,8 +74,8 @@ QUIZ_QUESTIONS = [
 
 # --- Data Fetching & Market Simulation ---
 @st.cache_data(ttl=30) # Fetch base prices more frequently
-def get_base_live_prices():
-    """Fetches the latest real-world price from yfinance to use as a baseline."""
+def get_real_market_prices():
+    """Fetches the latest real-world price from yfinance for real assets."""
     prices = {}
     yf_symbols = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL, NIFTY_INDEX_SYMBOL, BANKNIFTY_INDEX_SYMBOL]
     try:
@@ -91,49 +90,37 @@ def get_base_live_prices():
             prices[symbol] = random.uniform(10, 50000)
     return prices
 
-def simulate_market_prices(base_prices):
-    """Adjusts base prices based on various game mechanics."""
+def calculate_derived_prices(real_prices):
+    """Calculates prices for simulated assets like Futures, Options, and ETFs based on real index prices."""
     game_state = get_game_state()
-    simulated_prices = base_prices.copy()
-    
-    # Safely get volatility_multiplier, defaulting to 1.0 if it doesn't exist
-    volatility_multiplier = getattr(game_state, 'volatility_multiplier', 1.0)
-    
-    # Apply sentiment and volatility
-    for symbol in simulated_prices:
-        sentiment = game_state.market_sentiment.get(symbol, 0)
-        volatility_noise = random.uniform(-0.001, 0.001) * volatility_multiplier
-        price_multiplier = 1 + (sentiment * 0.005) + volatility_noise
-        simulated_prices[symbol] *= price_multiplier
-    
-    # Calculate derived asset prices
-    nifty_price = simulated_prices.get(NIFTY_INDEX_SYMBOL, 20000)
-    banknifty_price = simulated_prices.get(BANKNIFTY_INDEX_SYMBOL, 45000)
+    derived_prices = real_prices.copy()
+
+    nifty_price = derived_prices.get(NIFTY_INDEX_SYMBOL, 20000)
+    banknifty_price = derived_prices.get(BANKNIFTY_INDEX_SYMBOL, 45000)
     
     # Mock options
-    simulated_prices['NIFTY_CALL'] = nifty_price * 1.02
-    simulated_prices['NIFTY_PUT'] = nifty_price * 0.98
+    derived_prices['NIFTY_CALL'] = nifty_price * 1.02
+    derived_prices['NIFTY_PUT'] = nifty_price * 0.98
     
     # Futures with a random basis
-    simulated_prices['NIFTY-FUT'] = nifty_price * random.uniform(1.0, 1.005)
-    simulated_prices['BANKNIFTY-FUT'] = banknifty_price * random.uniform(1.0, 1.005)
+    derived_prices['NIFTY-FUT'] = nifty_price * random.uniform(1.0, 1.005)
+    derived_prices['BANKNIFTY-FUT'] = banknifty_price * random.uniform(1.0, 1.005)
     
     # Leveraged ETFs
     if len(game_state.price_history) >= 2:
         prev_nifty = game_state.price_history[-2].get(NIFTY_INDEX_SYMBOL, nifty_price)
         nifty_change = (nifty_price - prev_nifty) / prev_nifty
         
-        # Get current ETF prices to apply change
         current_bull = game_state.prices.get('NIFTY_BULL_3X', nifty_price/100)
         current_bear = game_state.prices.get('NIFTY_BEAR_3X', nifty_price/100)
 
-        simulated_prices['NIFTY_BULL_3X'] = current_bull * (1 + 3 * nifty_change)
-        simulated_prices['NIFTY_BEAR_3X'] = current_bear * (1 - 3 * nifty_change)
+        derived_prices['NIFTY_BULL_3X'] = current_bull * (1 + 3 * nifty_change)
+        derived_prices['NIFTY_BEAR_3X'] = current_bear * (1 - 3 * nifty_change)
     else:
-        simulated_prices['NIFTY_BULL_3X'] = nifty_price / 100
-        simulated_prices['NIFTY_BEAR_3X'] = nifty_price / 100
+        derived_prices['NIFTY_BULL_3X'] = nifty_price / 100
+        derived_prices['NIFTY_BEAR_3X'] = nifty_price / 100
 
-    return simulated_prices
+    return derived_prices
 
 @st.cache_data(ttl=3600)
 def get_historical_data(symbols, period="6mo"):
@@ -169,9 +156,9 @@ def apply_event_adjustment(prices, event_type):
         for sym in ['HDFCBANK.NS', 'ICICIBANK.NS', 'KOTAKBANK.NS', 'SBIN.NS', 'AXISBANK.NS']:
             if sym in adjusted_prices: adjusted_prices[sym] *= 1.07
     elif event_type == "Sector Rotation":
-        for sym in ['HDFCBANK.NS', 'ICICIBANK.NS']: # Out of Banking
+        for sym in ['HDFCBANK.NS', 'ICICIBANK.NS']:
             if sym in adjusted_prices: adjusted_prices[sym] *= 0.95
-        for sym in ['INFY.NS', 'TCS.NS']: # Into Tech
+        for sym in ['INFY.NS', 'TCS.NS']:
             if sym in adjusted_prices: adjusted_prices[sym] *= 1.10
     return adjusted_prices
 
@@ -222,9 +209,7 @@ def render_sidebar():
         if player_name and player_name.strip() and player_name not in game_state.players:
             starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
             game_state.players[player_name] = {
-                "mode": mode, 
-                "capital": starting_capital, 
-                "holdings": {}, "pnl": 0, "leverage": 1.0, 
+                "mode": mode, "capital": starting_capital, "holdings": {}, "pnl": 0, "leverage": 1.0, 
                 "margin_calls": 0, "pending_orders": [], "algo": "Off", "custom_algos": {},
                 "slippage_multiplier": 0.5 if mode == "HFT" else 1.0
             }
@@ -240,14 +225,11 @@ def render_sidebar():
         st.sidebar.success("Admin Access Granted")
         st.sidebar.title("⚙️ Admin Controls")
         
-        # Game Duration - Safely access attribute
         default_duration_minutes = int(getattr(game_state, 'round_duration_seconds', 1200) / 60)
         game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=default_duration_minutes, disabled=(game_state.game_status == "Running"))
 
-        # Volatility Control
         game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, getattr(game_state, 'volatility_multiplier', 1.0), 0.5)
 
-        # Manual Event Trigger
         event_to_trigger = st.sidebar.selectbox("Trigger Market Event", ["None", "Flash Crash", "Bull Rally", "Banking Boost", "Sector Rotation"])
         if event_to_trigger != "None":
             game_state.event_type = event_to_trigger
@@ -256,7 +238,6 @@ def render_sidebar():
             st.toast(f"Admin triggered: {event_to_trigger}!", icon="⚡")
             st.rerun()
             
-        # Player Cash Adjustment
         st.sidebar.markdown("---")
         st.sidebar.subheader("Adjust Player Capital")
         if game_state.players:
@@ -275,12 +256,11 @@ def render_sidebar():
             st.sidebar.info("No players to adjust.")
 
         st.sidebar.markdown("---")
-        # Game Controls
         if st.sidebar.button("▶️ Start Game", type="primary"):
             if game_state.players:
                 game_state.game_status = "Running"; game_state.game_start_time = time.time()
                 game_state.round_duration_seconds = game_duration_minutes * 60
-                game_state.futures_expiry_time = time.time() + (game_state.round_duration_seconds / 2) # Expiry halfway through
+                game_state.futures_expiry_time = time.time() + (game_state.round_duration_seconds / 2)
                 st.toast("Game Started!", icon="🎉"); st.rerun()
             else: st.sidebar.warning("Add at least one player to start.")
         if st.sidebar.button("⏸️ Stop Game"):
@@ -380,7 +360,6 @@ def render_algo_trading_tab(player_name, player, disabled_status):
     active_algo = player.get('algo', 'Off')
     player['algo'] = st.selectbox("Choose Strategy", all_strats, index=all_strats.index(active_algo) if active_algo in all_strats else 0, disabled=disabled_status, key=f"algo_{player_name}")
     
-    # Descriptions for default strats
     if player['algo'] in default_strats and player['algo'] != 'Off': st.info("Default strategy description...")
 
     with st.expander("Create Custom Strategy"):
@@ -446,11 +425,9 @@ def render_optimizer(holdings):
         else: st.error(performance)
 
 def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False):
-    game_state = get_game_state()
     base_price = prices.get(symbol, 0)
     if base_price == 0: return False
     
-    game_state.market_sentiment[symbol] = game_state.market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
     trade_price = base_price * calculate_slippage(player, symbol, qty, action); cost = trade_price * qty
     
     trade_executed = False
@@ -521,7 +498,6 @@ def render_live_market_table(prices):
 def run_game_tick(prices):
     game_state = get_game_state()
     if game_state.game_status != "Running": return prices
-    for symbol in game_state.market_sentiment: game_state.market_sentiment[symbol] *= 0.95
     if not game_state.event_active and random.random() < 0.01:
         events = ["Flash Crash", "Bull Rally", "Banking Boost", "Sector Rotation"]
         game_state.event_type = random.choice(events); game_state.event_active = True
@@ -578,16 +554,32 @@ def run_algo_strategies(prices):
                 if change_30_day is not None and change_30_day < -10: execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
 
 def main():
-    game_state = get_game_state(); render_sidebar()
-    base_prices = get_base_live_prices()
-    prices = simulate_market_prices(base_prices)
-    prices = run_game_tick(prices)
-    game_state.prices = prices
+    game_state = get_game_state()
+    render_sidebar()
+    
+    # --- Main Price Flow ---
+    # 1. Get real-time base prices for stocks, crypto, gold, and indices
+    real_prices = get_real_market_prices()
+    
+    # 2. Calculate prices for simulated assets (Futures, ETFs, Options) based on real prices
+    prices_with_derivatives = calculate_derived_prices(real_prices)
+    
+    # 3. Apply temporary simulation effects like market events
+    final_prices = run_game_tick(prices_with_derivatives)
+    
+    game_state.prices = final_prices
+    
     if not isinstance(game_state.price_history, list): game_state.price_history = []
-    game_state.price_history.append(prices)
+    # Store the final prices (with event effects) in history for change calculations
+    game_state.price_history.append(final_prices)
     if len(game_state.price_history) > 10: game_state.price_history.pop(0)
-    render_main_interface(prices)
-    if game_state.game_status == "Running": time.sleep(2); st.rerun()
+    
+    render_main_interface(final_prices)
+    
+    if game_state.game_status == "Running": 
+        # Optimized refresh rate for rapid UI processing
+        time.sleep(1)
+        st.rerun()
 
 if __name__ == "__main__":
     main()
