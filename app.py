@@ -36,6 +36,7 @@ BASE_SLIPPAGE_RATE = 0.005
 MARGIN_REQUIREMENT = 0.2
 ADMIN_PASSWORD = "100370" # Set your admin password here
 BID_ASK_SPREAD = 0.001 # 0.1% spread
+SHORT_SQUEEZE_THRESHOLD = 5 # Number of players shorting to trigger potential squeeze
 
 # --- Pre-built News Headlines ---
 PRE_BUILT_NEWS = [
@@ -44,6 +45,8 @@ PRE_BUILT_NEWS = [
     {"headline": "Government announces major infrastructure spending package, boosting banking stocks.", "impact": "Banking Boost"},
     {"headline": "Shocking fraud uncovered at a major private bank, sending shockwaves through the financial sector.", "impact": "Flash Crash"},
     {"headline": "Indian tech firm announces breakthrough in AI, sparking a rally in tech stocks.", "impact": "Sector Rotation"},
+    {"headline": "{symbol} secures a massive government contract, sending its stock soaring!", "impact": "Symbol Bull Run"},
+    {"headline": "Regulatory probe launched into {symbol} over accounting irregularities.", "impact": "Symbol Crash"},
     {"headline": "Government unexpectedly announces a ban on all private cryptocurrencies.", "impact": "Flash Crash"},
     {"headline": "FIIs show renewed interest in Indian equities, leading to broad-based buying.", "impact": "Bull Rally"},
     {"headline": "New regulations announced for the tech sector; investors react cautiously.", "impact": "Sector Rotation"},
@@ -223,7 +226,7 @@ def calculate_slippage(player, symbol, qty, action):
     slippage_mult = 1 + (slippage_rate * excess_qty) * (1 if action == "Buy" else -1)
     return max(0.9, min(1.1, slippage_mult))
 
-def apply_event_adjustment(prices, event_type):
+def apply_event_adjustment(prices, event_type, target_symbol=None):
     adjusted_prices = prices.copy()
     if event_type == "Flash Crash":
         adjusted_prices = {k: v * random.uniform(0.95, 0.98) for k, v in adjusted_prices.items()}
@@ -237,6 +240,12 @@ def apply_event_adjustment(prices, event_type):
             if sym in adjusted_prices: adjusted_prices[sym] *= 0.95
         for sym in ['INFY.NS', 'TCS.NS']:
             if sym in adjusted_prices: adjusted_prices[sym] *= 1.10
+    elif event_type == "Symbol Bull Run" and target_symbol:
+        adjusted_prices[target_symbol] *= 1.15
+    elif event_type == "Symbol Crash" and target_symbol:
+        adjusted_prices[target_symbol] *= 0.85
+    elif event_type == "Short Squeeze" and target_symbol:
+        adjusted_prices[target_symbol] *= 1.25
     elif event_type == "Volatility Spike":
          # This event is now handled by the volatility_multiplier in the main tick
         pass
@@ -317,6 +326,10 @@ def render_sidebar():
         
         news_options = {news['headline']: news['impact'] for news in PRE_BUILT_NEWS}
         news_to_trigger = st.sidebar.selectbox("Select News to Publish", ["None"] + list(news_options.keys()))
+        
+        target_symbol = None
+        if "{symbol}" in news_to_trigger:
+            target_symbol = st.sidebar.selectbox("Target Symbol", [s.replace(".NS", "") for s in NIFTY50_SYMBOLS]) + ".NS"
 
         if news_to_trigger != "None":
             st.sidebar.info(f"Impact: {news_options[news_to_trigger]}")
@@ -325,12 +338,13 @@ def render_sidebar():
             if news_to_trigger != "None":
                 selected_news = next((news for news in PRE_BUILT_NEWS if news["headline"] == news_to_trigger), None)
                 if selected_news:
-                    game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {selected_news['headline']}")
+                    headline = selected_news['headline'].format(symbol=target_symbol) if target_symbol else selected_news['headline']
+                    game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {headline}")
                     if len(game_state.news_feed) > 5: game_state.news_feed.pop()
                     game_state.event_type = selected_news['impact']
                     game_state.event_active = True
                     game_state.event_end = time.time() + 60
-                    st.toast(f"News Published!", icon="📰"); announce_news(selected_news['headline'])
+                    st.toast(f"News Published!", icon="📰"); announce_news(headline)
                     st.rerun()
 
         st.sidebar.markdown("---")
@@ -581,9 +595,15 @@ def render_transaction_history(player_name):
 
 def render_strategy_tab(player):
     st.subheader("📊 Strategy & Insights")
-    tab1, tab2 = st.tabs(["Technical Analysis (SMA)", "Portfolio Optimizer"])
-    with tab1: render_sma_chart(player['holdings'])
-    with tab2: render_optimizer(player['holdings'])
+    tab1, tab2, tab3 = st.tabs(["Performance Chart", "Technical Analysis (SMA)", "Portfolio Optimizer"])
+    with tab1:
+        st.markdown("##### Portfolio Value Over Time")
+        if len(player.get('value_history', [])) > 1:
+            st.line_chart(player['value_history'])
+        else:
+            st.info("Trade more to see your performance chart.")
+    with tab2: render_sma_chart(player['holdings'])
+    with tab3: render_optimizer(player['holdings'])
 
 def render_sma_chart(holdings):
     st.markdown("##### Simple Moving Average (SMA) Chart")
