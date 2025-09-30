@@ -259,7 +259,7 @@ def render_global_views(prices):
     render_leaderboard(prices)
 
     st.subheader("Live Market Feed")
-    render_global_trade_feed()
+    render_live_market_table(prices)
 
 def render_trade_execution_panel(prices):
     game_state = get_game_state()
@@ -505,19 +505,55 @@ def render_leaderboard(prices):
             st.subheader("🏆 Round Over! Final Standings:")
             st.table(lb_df.head(3))
 
-def render_global_trade_feed():
+def render_live_market_table(prices):
+    """Renders a single table combining live prices, price changes, and the last executed trade."""
     game_state = get_game_state()
+    
+    # Create DataFrame from current prices
+    prices_df = pd.DataFrame(prices.items(), columns=['Symbol', 'Price'])
+
+    # Calculate price change from the previous tick
+    if len(game_state.price_history) >= 2:
+        prev_prices = game_state.price_history[-2]
+        prices_df['prev_price'] = prices_df['Symbol'].map(prev_prices).fillna(prices_df['Price'])
+        prices_df['Change'] = prices_df['Price'] - prices_df['prev_price']
+    else:
+        prices_df['Change'] = 0.0
+    prices_df.drop(columns=['prev_price'], inplace=True, errors='ignore')
+
+    # Process all transactions to find the last trade for each symbol
     all_trades = []
     for player, transactions in game_state.transactions.items():
         for t in transactions:
+            # t = [Time, Action, Symbol, Qty, Price, Total]
             all_trades.append([player] + t)
-    
+
     if all_trades:
-        feed_df = pd.DataFrame(all_trades, columns=["Player", "Time", "Action", "Symbol", "Qty", "Price", "Total"])
-        feed_df = feed_df.sort_values(by="Time", ascending=False)
-        st.dataframe(feed_df.style.format(formatter={"Price": format_indian_currency, "Total": format_indian_currency}), height=200, use_container_width=True)
+        feed_df = pd.DataFrame(all_trades, columns=["Player", "Time", "Action", "Symbol", "Qty", "Trade Price", "Total"])
+        last_trades = feed_df.sort_values('Time').groupby('Symbol').last()
+        
+        # Create a formatted string for the last order
+        last_trades['Last Order'] = last_trades.apply(
+            lambda row: f"{row['Player']} {row['Action']} {row['Qty']} @ {format_indian_currency(row['Trade Price'])}", axis=1
+        )
+        
+        # Merge this information into the main prices DataFrame
+        prices_df = pd.merge(prices_df, last_trades[['Last Order']], on='Symbol', how='left')
     else:
-        st.info("No market activity yet.")
+        prices_df['Last Order'] = '-'
+
+    prices_df.fillna({'Last Order': '-'}, inplace=True)
+    
+    st.dataframe(
+        prices_df.style
+        .apply(lambda x: ['color: green' if v > 0 else 'color: red' if v < 0 else '' for v in x], subset=['Change'])
+        .format({
+            'Price': format_indian_currency,
+            'Change': lambda v: f"{format_indian_currency(v) if v != 0 else '-'}",
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
 
 def run_game_tick(prices):
     game_state = get_game_state()
