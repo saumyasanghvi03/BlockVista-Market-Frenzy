@@ -2,5 +2,5 @@ streamlit==1.38.0
 pandas==2.2.2
 yfinance==0.2.40
 matplotlib==3.9.2
-alphavantage
 numpy==1.26.4
+requests==2.32.3
