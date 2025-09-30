@@ -147,12 +147,15 @@ def get_historical_data(symbols, period="6mo"):
         return pd.DataFrame()
 
 # --- Game Logic Functions ---
-def calculate_slippage(symbol, qty, action):
+def calculate_slippage(player, symbol, qty, action):
     game_state = get_game_state()
     liquidity_level = game_state.liquidity.get(symbol, 1.0)
     if qty <= SLIPPAGE_THRESHOLD: return 1.0
+    
+    slippage_multiplier = player.get('slippage_multiplier', 1.0)
+    
     excess_qty = qty - SLIPPAGE_THRESHOLD
-    slippage_rate = BASE_SLIPPAGE_RATE / max(0.1, liquidity_level)
+    slippage_rate = (BASE_SLIPPAGE_RATE / max(0.1, liquidity_level)) * slippage_multiplier
     slippage_mult = 1 + (slippage_rate * excess_qty) * (1 if action == "Buy" else -1)
     return max(0.9, min(1.1, slippage_mult))
 
@@ -213,11 +216,18 @@ def render_sidebar():
     game_state = get_game_state()
     st.sidebar.title("📝 Game Entry")
     player_name = st.sidebar.text_input("Enter Name", key="name_input")
-    mode = st.sidebar.radio("Select Mode", ["VIP Guest", "Student"], key="mode_select")
+    mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
     
     if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
         if player_name and player_name.strip() and player_name not in game_state.players:
-            game_state.players[player_name] = {"mode": mode, "capital": INITIAL_CAPITAL, "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, "pending_orders": [], "algo": "Off", "custom_algos": {}}
+            starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
+            game_state.players[player_name] = {
+                "mode": mode, 
+                "capital": starting_capital, 
+                "holdings": {}, "pnl": 0, "leverage": 1.0, 
+                "margin_calls": 0, "pending_orders": [], "algo": "Off", "custom_algos": {},
+                "slippage_multiplier": 0.5 if mode == "HFT" else 1.0
+            }
             game_state.transactions[player_name] = []
             st.sidebar.success(f"{player_name} joined as {mode}!")
             st.rerun()
@@ -230,8 +240,9 @@ def render_sidebar():
         st.sidebar.success("Admin Access Granted")
         st.sidebar.title("⚙️ Admin Controls")
         
-        # Game Duration
-        game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=int(game_state.round_duration_seconds/60), disabled=(game_state.game_status == "Running"))
+        # Game Duration - Safely access attribute
+        default_duration_minutes = int(getattr(game_state, 'round_duration_seconds', 1200) / 60)
+        game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=default_duration_minutes, disabled=(game_state.game_status == "Running"))
 
         # Volatility Control
         game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, getattr(game_state, 'volatility_multiplier', 1.0), 0.5)
@@ -248,17 +259,20 @@ def render_sidebar():
         # Player Cash Adjustment
         st.sidebar.markdown("---")
         st.sidebar.subheader("Adjust Player Capital")
-        player_to_adjust = st.sidebar.selectbox("Select Player", list(game_state.players.keys()))
-        amount = st.sidebar.number_input("Amount", value=10000, step=1000)
-        c1, c2 = st.sidebar.columns(2)
-        if c1.button("Give Bonus"):
-            if player_to_adjust in game_state.players:
-                game_state.players[player_to_adjust]['capital'] += amount
-                st.toast(f"Gave {format_indian_currency(amount)} bonus to {player_to_adjust}", icon="💰")
-        if c2.button("Apply Penalty"):
-            if player_to_adjust in game_state.players:
-                game_state.players[player_to_adjust]['capital'] -= amount
-                st.toast(f"Applied {format_indian_currency(amount)} penalty to {player_to_adjust}", icon="💸")
+        if game_state.players:
+            player_to_adjust = st.sidebar.selectbox("Select Player", list(game_state.players.keys()))
+            amount = st.sidebar.number_input("Amount", value=10000, step=1000)
+            c1, c2 = st.sidebar.columns(2)
+            if c1.button("Give Bonus"):
+                if player_to_adjust in game_state.players:
+                    game_state.players[player_to_adjust]['capital'] += amount
+                    st.toast(f"Gave {format_indian_currency(amount)} bonus to {player_to_adjust}", icon="💰")
+            if c2.button("Apply Penalty"):
+                if player_to_adjust in game_state.players:
+                    game_state.players[player_to_adjust]['capital'] -= amount
+                    st.toast(f"Applied {format_indian_currency(amount)} penalty to {player_to_adjust}", icon="💸")
+        else:
+            st.sidebar.info("No players to adjust.")
 
         st.sidebar.markdown("---")
         # Game Controls
@@ -310,14 +324,14 @@ def render_trade_execution_panel(prices):
         
         holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
         total_value = player['capital'] + holdings_value
-        pnl = total_value - INITIAL_CAPITAL
+        pnl = total_value - (INITIAL_CAPITAL * 5 if player['mode'] == 'HNI' else INITIAL_CAPITAL)
         player['pnl'] = pnl
         pnl_arrow = "🔼" if pnl >= 0 else "🔽"
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Cash", format_indian_currency(player['capital']))
         c2.metric("Portfolio Value", format_indian_currency(total_value))
-        c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow} {pnl/INITIAL_CAPITAL:.2%}")
+        c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow}")
 
         tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Transaction History", "📊 Strategy & Insights"]
         tab1, tab2, tab3, tab4 = st.tabs(tabs)
@@ -333,7 +347,7 @@ def render_trade_interface(player_name, player, prices, disabled_status):
         asset_types = ["Stock", "Crypto", "Gold", "Futures", "Leveraged ETF", "Option"]
         asset_type = st.radio("Asset Type", asset_types, horizontal=True, key=f"asset_{player_name}", disabled=disabled_status)
 
-        if asset_type == "Futures":
+        if asset_type == "Futures" and getattr(get_game_state(), 'futures_expiry_time', 0) > 0:
             expiry_remaining = max(0, get_game_state().futures_expiry_time - time.time())
             st.warning(f"Futures contracts expire and will be cash-settled in **{int(expiry_remaining // 60)}m {int(expiry_remaining % 60)}s**")
 
@@ -437,7 +451,7 @@ def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=Fals
     if base_price == 0: return False
     
     game_state.market_sentiment[symbol] = game_state.market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
-    trade_price = base_price * calculate_slippage(symbol, qty, action); cost = trade_price * qty
+    trade_price = base_price * calculate_slippage(player, symbol, qty, action); cost = trade_price * qty
     
     trade_executed = False
     if action == "Buy" and player['capital'] >= cost:
@@ -521,7 +535,7 @@ def run_game_tick(prices):
 
 def handle_futures_expiry(prices):
     game_state = get_game_state()
-    if not game_state.futures_settled and game_state.futures_expiry_time > 0 and time.time() > game_state.futures_expiry_time:
+    if not game_state.futures_settled and getattr(game_state, 'futures_expiry_time', 0) > 0 and time.time() > game_state.futures_expiry_time:
         st.warning("FUTURES EXPIRED! All open futures positions are being cash-settled.")
         settlement_prices = { 'NIFTY-FUT': prices.get(NIFTY_INDEX_SYMBOL), 'BANKNIFTY-FUT': prices.get(BANKNIFTY_INDEX_SYMBOL) }
         for name, player in game_state.players.items():
@@ -577,3 +591,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
