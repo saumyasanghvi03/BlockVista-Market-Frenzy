@@ -15,7 +15,7 @@ st.set_page_config(layout="wide", page_title="BlockVista Market Frenzy", page_ic
 
 # --- API & Game Configuration ---
 GAME_NAME = "BlockVista Market Frenzy"
-INITIAL_CAPITAL = 1000000  # ₹10 lakh
+INITIAL_CAPITAL = 1000000  # ₹10L
 ROUND_DURATION = 20 * 60   # 20 minutes in seconds
 
 # Define asset symbols
