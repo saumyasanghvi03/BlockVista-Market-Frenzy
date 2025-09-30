@@ -651,7 +651,7 @@ def main():
     render_main_interface(final_prices)
     
     if game_state.game_status == "Running": 
-        time.sleep(2)
+        time.sleep(1)
         st.rerun()
 
 if __name__ == "__main__":
