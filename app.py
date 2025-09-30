@@ -13,10 +13,43 @@ from pypfopt import EfficientFrontier, risk_models, expected_returns
 # --- Page Configuration ---
 st.set_page_config(layout="wide", page_title="BlockVista Market Frenzy", page_icon="📈")
 
+# --- Dark Theme CSS ---
+DARK_THEME_CSS = """
+<style>
+/* Main body and text */
+body {
+    color: #fafafa;
+}
+/* Main app background */
+[data-testid="stAppViewContainer"] > .main {
+    background-color: #0E117;
+}
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #1a1c2e;
+}
+/* Headers and titles */
+h1, h2, h3, h4, h5, h6 {
+    color: #fafafa;
+}
+/* Dataframe header */
+.st-emotion-cache-1n7693i {
+    background-color: #262730;
+}
+/* Container with border */
+.st-emotion-cache-q8sbsg {
+    border: 1px solid #444;
+}
+/* Metric labels */
+[data-testid="stMetricLabel"] {
+    color: #a0a0a0;
+}
+</style>
+"""
+
 # --- API & Game Configuration ---
 GAME_NAME = "BlockVista Market Frenzy"
 INITIAL_CAPITAL = 1000000  # ₹10L
-ROUND_DURATION = 20 * 60   # 20 minutes in seconds
 
 # Define asset symbols
 NIFTY50_SYMBOLS = ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'TCS.NS',
@@ -40,6 +73,7 @@ class GameState:
         self.players = {}
         self.game_status = "Stopped"
         self.game_start_time = 0
+        self.round_duration_seconds = 20 * 60 # Default duration
         self.prices = {}
         self.price_history = []
         self.transactions = {}
@@ -195,6 +229,12 @@ def calculate_indicator(indicator, symbol):
 
 # --- UI Functions ---
 def render_sidebar():
+    # --- Theme Selector ---
+    st.sidebar.title("🎨 Theme")
+    theme_index = 0 if st.session_state.get("theme", "Light") == "Light" else 1
+    theme = st.sidebar.radio("Select Theme", ["Light", "Dark"], index=theme_index, key="theme_selector")
+    st.session_state.theme = theme
+    
     game_state = get_game_state()
     st.sidebar.title("📝 Game Entry")
 
@@ -215,10 +255,13 @@ def render_sidebar():
             st.sidebar.error("Name is invalid or already taken!")
 
     st.sidebar.title("⚙️ Admin Controls")
+    game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=20, disabled=(game_state.game_status == "Running"))
+
     if st.sidebar.button("▶️ Start Game", type="primary"):
         if game_state.players:
             game_state.game_status = "Running"
             game_state.game_start_time = time.time()
+            game_state.round_duration_seconds = game_duration_minutes * 60
             st.toast("Game Started!", icon="🎉")
             st.rerun()
         else:
@@ -239,7 +282,7 @@ def render_main_interface(prices):
     st.title(f"📈 {GAME_NAME}")
     
     if game_state.game_status == "Running":
-        remaining_time = max(0, ROUND_DURATION - int(time.time() - game_state.game_start_time))
+        remaining_time = max(0, game_state.round_duration_seconds - int(time.time() - game_state.game_start_time))
         if remaining_time == 0:
             game_state.game_status = "Finished"
         st.markdown(f"<div class='timer'>Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}</div>", unsafe_allow_html=True)
@@ -508,13 +551,21 @@ def render_leaderboard(prices):
         lb.append((pname, pdata['mode'], total_value, pdata['pnl']))
     
     if lb:
-        lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L"]).sort_values("Portfolio Value", ascending=False)
+        lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L"]).sort_values("Portfolio Value", ascending=False).reset_index(drop=True)
         st.dataframe(lb_df.style.format(formatter={"Portfolio Value": format_indian_currency, "P&L": format_indian_currency}), use_container_width=True)
         
         if game_state.game_status == "Finished":
             st.balloons()
-            st.subheader("🏆 Round Over! Final Standings:")
+            winner = lb_df.iloc[0]
+            st.success(f"🎉 The winner is {winner['Player']}! 🎉")
+            
+            c1, c2 = st.columns(2)
+            c1.metric("🏆 Final Portfolio Value", format_indian_currency(winner['Portfolio Value']))
+            c2.metric("💰 Total P&L", format_indian_currency(winner['P&L']))
+
+            st.subheader("Final Top 3 Standings:")
             st.table(lb_df.head(3))
+
 
 def render_live_market_table(prices):
     """Renders a single table combining live prices, price changes, and the last executed trade."""
@@ -640,6 +691,12 @@ def run_algo_strategies(prices):
                 execute_trade(name, player, strategy['action'], trade_symbol, 1, prices, is_algo=True)
 
 def main():
+    if "theme" not in st.session_state:
+        st.session_state.theme = "Light"
+
+    if st.session_state.get("theme") == "Dark":
+        st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
+
     game_state = get_game_state()
     render_sidebar()
     base_prices = get_base_live_prices()
