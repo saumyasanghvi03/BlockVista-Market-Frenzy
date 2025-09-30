@@ -77,7 +77,11 @@ def get_live_prices():
 def get_historical_data(symbols, period="6mo"):
     try:
         data = yf.download(tickers=symbols, period=period, progress=False)
-        return data['Close']
+        close_data = data['Close']
+        # The fix is to ensure the output is always a DataFrame.
+        if isinstance(close_data, pd.Series):
+            return close_data.to_frame(name=symbols[0])
+        return close_data
     except Exception:
         return pd.DataFrame()
 
@@ -350,7 +354,8 @@ def render_sma_chart(holdings):
     hist_data = get_historical_data([chart_symbol], period="6mo")
 
     if not hist_data.empty:
-        df = hist_data.to_frame(name='Close')
+        df = hist_data.rename(columns={chart_symbol: 'Close'})
+        
         df['SMA_20'] = df['Close'].rolling(window=20).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         
