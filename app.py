@@ -313,7 +313,13 @@ def render_sidebar():
     password = st.sidebar.text_input("Enter Password", type="password")
 
     if password == ADMIN_PASSWORD:
+        st.session_state.role = 'admin'
         st.sidebar.success("Admin Access Granted")
+
+        if st.sidebar.button("Logout Admin"):
+            st.session_state.role = 'player'
+            st.rerun()
+
         st.sidebar.title("⚙️ Admin Controls")
         
         default_duration_minutes = int(getattr(game_state, 'round_duration_seconds', 1200) / 60)
@@ -328,7 +334,7 @@ def render_sidebar():
         news_to_trigger = st.sidebar.selectbox("Select News to Publish", ["None"] + list(news_options.keys()))
         
         target_symbol = None
-        if "{symbol}" in news_to_trigger:
+        if news_to_trigger and "{symbol}" in news_to_trigger:
             target_symbol = st.sidebar.selectbox("Target Symbol", [s.replace(".NS", "") for s in NIFTY50_SYMBOLS]) + ".NS"
 
         if news_to_trigger != "None":
@@ -338,7 +344,7 @@ def render_sidebar():
             if news_to_trigger != "None":
                 selected_news = next((news for news in PRE_BUILT_NEWS if news["headline"] == news_to_trigger), None)
                 if selected_news:
-                    headline = selected_news['headline'].format(symbol=target_symbol) if target_symbol else selected_news['headline']
+                    headline = selected_news['headline'].format(symbol=target_symbol.replace(".NS","") if target_symbol else "")
                     game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {headline}")
                     if len(game_state.news_feed) > 5: game_state.news_feed.pop()
                     game_state.event_type = selected_news['impact']
@@ -894,6 +900,9 @@ def run_algo_strategies(prices):
 
 def main():
     game_state = get_game_state()
+    if 'role' not in st.session_state:
+        st.session_state.role = 'player'
+    
     render_sidebar()
     
     # --- Main Price Flow ---
@@ -920,7 +929,21 @@ def main():
     game_state.price_history.append(final_prices)
     if len(game_state.price_history) > 10: game_state.price_history.pop(0)
     
-    render_main_interface(final_prices)
+    if st.session_state.role == 'admin':
+        st.title(f"👑 {GAME_NAME} - Admin Dashboard")
+        st.components.v1.html('<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>', height=0)
+        
+        if game_state.game_status == "Running":
+            remaining_time = max(0, game_state.round_duration_seconds - int(time.time() - game_state.game_start_time))
+            st.markdown(f"**Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}**")
+        elif game_state.game_status == "Stopped":
+            st.info("Game is paused.")
+        elif game_state.game_status == "Finished":
+            st.success("Game has finished!")
+
+        render_global_views(final_prices)
+    else:
+        render_main_interface(final_prices)
     
     if game_state.game_status == "Running": 
         time.sleep(1)
