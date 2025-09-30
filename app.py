@@ -72,6 +72,7 @@ class GameState:
         self.news_feed = []
         self.powell_morning_triggered = False
         self.powell_afternoon_triggered = False
+        self.auto_square_off_complete = False
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices."""
@@ -361,8 +362,11 @@ def render_main_interface(prices):
     with col2: render_global_views(prices)
 
 def render_global_views(prices):
-    st.subheader("📰 Live News Feed")
     game_state = get_game_state()
+    
+    render_market_sentiment_meter()
+    
+    st.subheader("📰 Live News Feed")
     news_feed = getattr(game_state, 'news_feed', [])
     if news_feed:
         for news in news_feed:
@@ -374,6 +378,27 @@ def render_global_views(prices):
     render_leaderboard(prices)
     st.subheader("Live Market Feed")
     render_live_market_table(prices)
+
+def render_market_sentiment_meter():
+    game_state = get_game_state()
+    sentiments = [s for s in game_state.market_sentiment.values() if s != 0]
+    if not sentiments:
+        overall_sentiment = 0
+    else:
+        overall_sentiment = np.mean(sentiments)
+    
+    # Normalize sentiment to 0-100 scale
+    # Raw sentiment is roughly -5 to 5, let's cap it for the gauge
+    normalized_sentiment = np.clip((overall_sentiment + 5) * 10, 0, 100)
+    
+    color = "green" if normalized_sentiment > 60 else "red" if normalized_sentiment < 40 else "orange"
+    
+    st.markdown("##### Market Sentiment")
+    st.progress(int(normalized_sentiment))
+    c1, c2 = st.columns(2)
+    c1.write("<p style='color:red;'>Extreme Fear</p>", unsafe_allow_html=True)
+    c2.write("<p style='text-align: right; color:green;'>Extreme Greed</p>", unsafe_allow_html=True)
+
 
 def render_trade_execution_panel(prices):
     game_state = get_game_state()
@@ -583,6 +608,11 @@ def render_leaderboard(prices):
         st.dataframe(lb_df.style.format(formatter={"Portfolio Value": format_indian_currency, "P&L": format_indian_currency, "Sharpe Ratio": "{:.2f}"}), use_container_width=True)
         
         if game_state.game_status == "Finished":
+            if not getattr(game_state, 'auto_square_off_complete', False):
+                auto_square_off_positions(prices)
+                game_state.auto_square_off_complete = True
+                st.rerun() # Rerun to update the leaderboard with final values
+
             st.balloons(); winner = lb_df.iloc[0]
             st.success(f"🎉 The winner is {winner['Player']}! 🎉")
             c1, c2 = st.columns(2)
@@ -623,7 +653,7 @@ def run_game_tick(prices):
 
     elapsed_time = time.time() - game_state.game_start_time
     # Powell Morning Speech
-    if not game_state.powell_morning_triggered and elapsed_time > 120: # 2 minutes in
+    if not getattr(game_state, 'powell_morning_triggered', False) and elapsed_time > 120:
         news_item = next((news for news in PRE_BUILT_NEWS if "Good Morning" in news["headline"]), None)
         if news_item:
             game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
@@ -632,7 +662,7 @@ def run_game_tick(prices):
             game_state.powell_morning_triggered = True
 
     # Powell Afternoon Speech
-    if not game_state.powell_afternoon_triggered and elapsed_time > (game_state.round_duration_seconds - 120): # 2 minutes before end
+    if not getattr(game_state, 'powell_afternoon_triggered', False) and elapsed_time > (game_state.round_duration_seconds - 120):
         news_item = next((news for news in PRE_BUILT_NEWS if "Good Afternoon" in news["headline"]), None)
         if news_item:
             game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
@@ -640,7 +670,7 @@ def run_game_tick(prices):
             game_state.event_end = time.time() + 60
             game_state.powell_afternoon_triggered = True
 
-    if not game_state.event_active and random.random() < 0.02: 
+    if not game_state.event_active and random.random() < 0.05: 
         news_item = random.choice([n for n in PRE_BUILT_NEWS if "Powell" not in n['headline']])
         game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
         if len(game_state.news_feed) > 5: game_state.news_feed.pop()
@@ -665,6 +695,25 @@ def run_game_tick(prices):
         player['value_history'].append(total_value)
         
     return prices
+
+def auto_square_off_positions(prices):
+    """Automatically closes all intraday positions at the end of the game."""
+    game_state = get_game_state()
+    st.info("End of game: Auto-squaring off all intraday, futures, and options positions...")
+    square_off_assets = NIFTY50_SYMBOLS + FUTURES_SYMBOLS + OPTION_SYMBOLS + LEVERAGED_ETFS
+    
+    for name, player in game_state.players.items():
+        for symbol, qty in list(player['holdings'].items()): # Use list to avoid modification issues
+            if symbol in square_off_assets:
+                closing_price = prices.get(symbol, 0)
+                value = closing_price * qty
+                if qty > 0: # Long position
+                    player['capital'] += value
+                    log_transaction(name, "Auto-Squareoff (Sell)", symbol, qty, closing_price, value)
+                else: # Short position
+                    player['capital'] -= value # Cost to buy back
+                    log_transaction(name, "Auto-Squareoff (Buy)", abs(qty), closing_price, value)
+                del player['holdings'][symbol]
 
 def handle_futures_expiry(prices):
     game_state = get_game_state()
