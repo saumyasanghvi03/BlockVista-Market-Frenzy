@@ -277,7 +277,7 @@ def render_algo_trading_tab(player_name, player, disabled_status):
     algo_choice = st.selectbox(
         "Choose Strategy",
         ["Off", "Momentum Trader", "Mean Reversion"],
-        index=["Off", "Momentum Trader", "Mean Reversion"].index(player['algo']),
+        index=["Off", "Momentum Trader", "Mean Reversion"].index(player.get('algo', 'Off')),
         disabled=not disabled_status,
         key=f"algo_{player_name}"
     )
@@ -459,16 +459,16 @@ def run_algo_strategies(prices):
     prev_prices = st.session_state.price_history[-1]
     
     for name, player in st.session_state.players.items():
-        if player['algo'] == 'Off': continue
+        if player.get('algo', 'Off') == 'Off': continue
         
         trade_symbol = random.choice(NIFTY50_SYMBOLS + CRYPTO_SYMBOLS)
         price_change = prices[trade_symbol] - prev_prices.get(trade_symbol, prices[trade_symbol])
         
-        if player['algo'] == "Momentum Trader" and abs(price_change) > 0.1:
+        if player.get('algo', 'Off') == "Momentum Trader" and abs(price_change) > 0.1:
             if price_change > 0: execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
             else: execute_trade(name, player, "Sell", trade_symbol, 1, prices, is_algo=True)
                 
-        elif player['algo'] == "Mean Reversion" and abs(price_change) > 0.1:
+        elif player.get('algo', 'Off') == "Mean Reversion" and abs(price_change) > 0.1:
             if price_change > 0: execute_trade(name, player, "Sell", trade_symbol, 1, prices, is_algo=True)
             else: execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
 
