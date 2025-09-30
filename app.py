@@ -13,40 +13,6 @@ from pypfopt import EfficientFrontier, risk_models, expected_returns
 # --- Page Configuration ---
 st.set_page_config(layout="wide", page_title="BlockVista Market Frenzy", page_icon="📈")
 
-# --- Dark Theme CSS ---
-DARK_THEME_CSS = """
-<style>
-/* Main body and text */
-body {
-    color: #fafafa;
-}
-/* Main app background */
-[data-testid="stAppViewContainer"] > .main {
-    background-color: #0E117;
-}
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background-color: #1a1c2e;
-}
-/* Headers and titles */
-h1, h2, h3, h4, h5, h6 {
-    color: #fafafa;
-}
-/* Dataframe header */
-.st-emotion-cache-1n7693i {
-    background-color: #262730;
-}
-/* Container with border */
-.st-emotion-cache-q8sbsg {
-    border: 1px solid #444;
-}
-/* Metric labels */
-[data-testid="stMetricLabel"] {
-    color: #a0a0a0;
-}
-</style>
-"""
-
 # --- API & Game Configuration ---
 GAME_NAME = "BlockVista Market Frenzy"
 INITIAL_CAPITAL = 1000000  # ₹10L
@@ -65,6 +31,7 @@ ALL_SYMBOLS = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL] + OPTION_SYMBOLS
 SLIPPAGE_THRESHOLD = 10
 BASE_SLIPPAGE_RATE = 0.005
 MARGIN_REQUIREMENT = 0.2
+ADMIN_PASSWORD = "admin123" # Set your admin password here
 
 # --- Game State Management (Singleton for Live Sync) ---
 class GameState:
@@ -229,12 +196,6 @@ def calculate_indicator(indicator, symbol):
 
 # --- UI Functions ---
 def render_sidebar():
-    # --- Theme Selector ---
-    st.sidebar.title("🎨 Theme")
-    theme_index = 0 if st.session_state.get("theme", "Light") == "Light" else 1
-    theme = st.sidebar.radio("Select Theme", ["Light", "Dark"], index=theme_index, key="theme_selector")
-    st.session_state.theme = theme
-    
     game_state = get_game_state()
     st.sidebar.title("📝 Game Entry")
 
@@ -253,29 +214,36 @@ def render_sidebar():
             st.rerun()
         else:
             st.sidebar.error("Name is invalid or already taken!")
+    
+    st.sidebar.title("🔐 Admin Login")
+    password = st.sidebar.text_input("Enter Password", type="password")
 
-    st.sidebar.title("⚙️ Admin Controls")
-    game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=20, disabled=(game_state.game_status == "Running"))
+    if password == ADMIN_PASSWORD:
+        st.sidebar.success("Admin Access Granted")
+        st.sidebar.title("⚙️ Admin Controls")
+        game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=20, disabled=(game_state.game_status == "Running"))
 
-    if st.sidebar.button("▶️ Start Game", type="primary"):
-        if game_state.players:
-            game_state.game_status = "Running"
-            game_state.game_start_time = time.time()
-            game_state.round_duration_seconds = game_duration_minutes * 60
-            st.toast("Game Started!", icon="🎉")
+        if st.sidebar.button("▶️ Start Game", type="primary"):
+            if game_state.players:
+                game_state.game_status = "Running"
+                game_state.game_start_time = time.time()
+                game_state.round_duration_seconds = game_duration_minutes * 60
+                st.toast("Game Started!", icon="🎉")
+                st.rerun()
+            else:
+                st.sidebar.warning("Add at least one player to start.")
+                
+        if st.sidebar.button("⏸️ Stop Game"):
+            game_state.game_status = "Stopped"
+            st.toast("Game Paused!", icon="⏸️")
             st.rerun()
-        else:
-            st.sidebar.warning("Add at least one player to start.")
             
-    if st.sidebar.button("⏸️ Stop Game"):
-        game_state.game_status = "Stopped"
-        st.toast("Game Paused!", icon="⏸️")
-        st.rerun()
-        
-    if st.sidebar.button("🔄 Reset Game"):
-        game_state.reset()
-        st.toast("Game has been reset.", icon="🔄")
-        st.rerun()
+        if st.sidebar.button("🔄 Reset Game"):
+            game_state.reset()
+            st.toast("Game has been reset.", icon="🔄")
+            st.rerun()
+    elif password:
+        st.sidebar.error("Incorrect Password")
 
 def render_main_interface(prices):
     game_state = get_game_state()
@@ -691,12 +659,6 @@ def run_algo_strategies(prices):
                 execute_trade(name, player, strategy['action'], trade_symbol, 1, prices, is_algo=True)
 
 def main():
-    if "theme" not in st.session_state:
-        st.session_state.theme = "Light"
-
-    if st.session_state.get("theme") == "Dark":
-        st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
-
     game_state = get_game_state()
     render_sidebar()
     base_prices = get_base_live_prices()
