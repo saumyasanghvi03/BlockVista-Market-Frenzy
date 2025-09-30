@@ -50,8 +50,7 @@ PRE_BUILT_NEWS = [
     {"headline": "Government unexpectedly announces a ban on all private cryptocurrencies.", "impact": "Flash Crash"},
     {"headline": "FIIs show renewed interest in Indian equities, leading to broad-based buying.", "impact": "Bull Rally"},
     {"headline": "New regulations announced for the tech sector; investors react cautiously.", "impact": "Sector Rotation"},
-    {"headline": "Fed Chair Jerome Powell: 'Good Morning, the economy is resilient, but we remain watchful.'", "impact": "Volatility Spike"},
-    {"headline": "Fed Chair Jerome Powell: 'Good Afternoon, we will continue to monitor the data closely.'", "impact": "Volatility Spike"},
+    {"headline": "Fed Chair Jerome Powell: 'The economy is resilient, but we remain watchful.'", "impact": "Volatility Spike"},
 ]
 
 # --- Game State Management (Singleton for Live Sync) ---
@@ -75,8 +74,6 @@ class GameState:
         self.event_end = 0
         self.volatility_multiplier = 1.0
         self.news_feed = []
-        self.powell_morning_triggered = False
-        self.powell_afternoon_triggered = False
         self.auto_square_off_complete = False
 
     def reset(self):
@@ -399,9 +396,13 @@ def render_main_interface(prices):
     elif game_state.game_status == "Stopped": st.info("Game is paused. Press 'Start Game' to begin.")
     elif game_state.game_status == "Finished": st.success("Game has finished! See the final leaderboard below.")
 
-    col1, col2 = st.columns([1, 1]); 
-    with col1: render_trade_execution_panel(prices)
-    with col2: render_global_views(prices)
+    if st.session_state.get('role') == 'admin':
+        render_global_views(prices)
+    else:
+        col1, col2 = st.columns([1, 1]); 
+        with col1: render_trade_execution_panel(prices)
+        with col2: render_global_views(prices)
+
 
 def render_global_views(prices):
     with st.container(border=True):
