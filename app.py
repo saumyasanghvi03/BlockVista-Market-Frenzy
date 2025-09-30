@@ -1,3 +1,5 @@
+# ======================= Expo Game: BlockVista Market Frenzy ======================
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -6,6 +8,15 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 import io
+import requests  # Added for BlockVista API integration
+from typing import Dict, Any
+
+# --- BlockVista API Configuration ---
+# Replace with your actual BlockVista API details
+BLOCKVISTA_API_URL = "https://api.blockvista.com/v1"  # Example base URL
+BLOCKVISTA_API_KEY = st.secrets.get("BLOCKVISTA_API_KEY", "your_api_key_here")  # Store in Streamlit secrets
+SYMBOLS_FOR_API = ['RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 
+                   'KOTAKBANK', 'SBIN', 'ITC', 'ASIANPAINT', 'AXISBANK']  # Without .NS for API
 
 # --- Game Config ---
 GAME_NAME = "BlockVista Market Frenzy"
@@ -13,8 +24,8 @@ INITIAL_CAPITAL = 1000000  # ₹10 lakh
 ROUND_DURATION = 20 * 60   # 20 minutes in seconds
 NIFTY50_SYMBOLS = ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'TCS.NS', 
                    'KOTAKBANK.NS', 'SBIN.NS', 'ITC.NS', 'ASIANPAINT.NS', 'AXISBANK.NS']
-GOLD_SYMBOL = 'GC=F'  # Gold futures
-OPTION_SYMBOLS = ['NIFTY_CALL', 'NIFTY_PUT']  # Mock options
+GOLD_SYMBOL = 'GC=F'  # Gold futures (fallback to yf if not in BlockVista)
+OPTION_SYMBOLS = ['NIFTY_CALL', 'NIFTY_PUT']  # Mock options (extend API if supported)
 LIQUIDITY_LEVELS = {sym: random.uniform(0.5, 1.0) for sym in NIFTY50_SYMBOLS + [GOLD_SYMBOL] + OPTION_SYMBOLS}
 SLIPPAGE_THRESHOLD = 10  # Qty threshold for slippage
 BASE_SLIPPAGE_RATE = 0.005  # 0.5% per extra unit
@@ -30,18 +41,40 @@ QUIZ_QUESTIONS = [
     {"question": "What is short-selling?", "options": ["Buying low, selling high", "Selling borrowed shares", "Holding for dividends"], "answer": 1},
 ]
 
-# --- Fetch Live Prices ---
+# --- Fetch Live Prices from BlockVista API ---
 @st.cache_data(ttl=60)
 def get_live_prices():
     prices = {}
-    for symbol in NIFTY50_SYMBOLS + [GOLD_SYMBOL, '^NSEI']:
+    try:
+        # BlockVista API Call for Nifty50
+        headers = {"Authorization": f"Bearer {BLOCKVISTA_API_KEY}"}
+        params = {"symbols": ",".join(SYMBOLS_FOR_API), "exchange": "NSE"}
+        response = requests.get(f"{BLOCKVISTA_API_URL}/prices", headers=headers, params=params, timeout=10)
+        if response.status_code == 200:
+            api_data = response.json()
+            # Assume API returns {'data': {'RELIANCE': {'price': 2500.0}, ...}}
+            for symbol, data in api_data.get('data', {}).items():
+                prices[f"{symbol}.NS"] = data.get('price', random.uniform(1000, 3500))
+            st.success("Fetched live prices from BlockVista API!")  # Optional notification
+        else:
+            st.warning(f"BlockVista API error ({response.status_code}). Falling back to yfinance.")
+    except Exception as e:
+        st.warning(f"BlockVista API unavailable: {e}. Falling back to yfinance.")
+    
+    # Fallback to yfinance for missing symbols (e.g., Gold, Options, Nifty Index)
+    fallback_symbols = [s for s in [GOLD_SYMBOL, '^NSEI'] if s not in prices]
+    for symbol in fallback_symbols:
         try:
             data = yf.Ticker(symbol).info
             prices[symbol] = data.get('regularMarketPrice') or data.get('previousClose') or random.uniform(1000, 3500)
         except:
             prices[symbol] = random.uniform(1000, 3500)
-    prices['NIFTY_CALL'] = prices['^NSEI'] * 1.02 if '^NSEI' in prices else 100
-    prices['NIFTY_PUT'] = prices['^NSEI'] * 0.98 if '^NSEI' in prices else 100
+    
+    # Mock options based on Nifty (extend with BlockVista options endpoint if available)
+    nifty_price = prices.get('^NSEI', 100)
+    prices['NIFTY_CALL'] = nifty_price * 1.02
+    prices['NIFTY_PUT'] = nifty_price * 0.98
+    
     return prices
 
 # --- Calculate Slippage ---
@@ -176,7 +209,7 @@ if st.session_state.event_active and time.time() < st.session_state.event_end:
     prices, _ = apply_event_adjustment(prices, st.session_state.event_type, liquidity_adjust=True)
 st.session_state.prices = prices
 
-st.markdown("<div class='section'>Live Market Prices</div>", unsafe_allow_html=True)
+st.markdown("<div class='section'>Live Market Prices (via BlockVista API)</div>", unsafe_allow_html=True)
 price_df = pd.DataFrame.from_dict(prices, orient='index', columns=['Price']).sort_index()
 price_df['Liquidity'] = pd.Series(LIQUIDITY_LEVELS).reindex(price_df.index)
 price_df['Volatility'] = pd.Series(VOLATILITY_BASE).reindex(price_df.index)
@@ -343,7 +376,7 @@ elif st.session_state.event_active and time.time() >= st.session_state.event_end
         VOLATILITY_BASE[sym] = random.uniform(0.1, 0.3)
 
 # --- Quiz Bonus ---
-if random.random() < 0.005 and not st.session_state.quiz_triggered:
+if random.random() < 0.005 and not st.session_state.quiz_triggered and 'selected_player' in locals():
     quiz = random.choice(QUIZ_QUESTIONS)
     with st.expander("📚 Quick Quiz! Answer for Bonus Capital", expanded=True):
         st.markdown(f"<div class='quiz'>{quiz['question']}</div>", unsafe_allow_html=True)
