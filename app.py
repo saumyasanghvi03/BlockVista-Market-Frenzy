@@ -13,40 +13,6 @@ from pypfopt import EfficientFrontier, risk_models, expected_returns
 # --- Page Configuration ---
 st.set_page_config(layout="wide", page_title="BlockVista Market Frenzy", page_icon="📈")
 
-# --- Dark Theme CSS ---
-DARK_THEME_CSS = """
-<style>
-/* Main body and text */
-body {
-    color: #fafafa;
-}
-/* Main app background */
-[data-testid="stAppViewContainer"] > .main {
-    background-color: #0E1117;
-}
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background-color: #1a1c2e;
-}
-/* Headers and titles */
-h1, h2, h3, h4, h5, h6 {
-    color: #fafafa;
-}
-/* Dataframe header */
-.st-emotion-cache-1n7693i {
-    background-color: #262730;
-}
-/* Container with border */
-.st-emotion-cache-q8sbsg {
-    border: 1px solid #444;
-}
-/* Metric labels */
-[data-testid="stMetricLabel"] {
-    color: #a0a0a0;
-}
-</style>
-"""
-
 # --- API & Game Configuration ---
 GAME_NAME = "BlockVista Market Frenzy"
 INITIAL_CAPITAL = 1000000  # ₹10L
@@ -229,12 +195,6 @@ def calculate_indicator(indicator, symbol):
 
 # --- UI Functions ---
 def render_sidebar():
-    # --- Theme Selector ---
-    st.sidebar.title("🎨 Theme")
-    theme_index = 0 if st.session_state.get("theme", "Light") == "Light" else 1
-    theme = st.sidebar.radio("Select Theme", ["Light", "Dark"], index=theme_index, key="theme_selector")
-    st.session_state.theme = theme
-    
     game_state = get_game_state()
     st.sidebar.title("📝 Game Entry")
 
@@ -680,12 +640,6 @@ def run_algo_strategies(prices):
                 execute_trade(name, player, strategy['action'], trade_symbol, 1, prices, is_algo=True)
 
 def main():
-    if "theme" not in st.session_state:
-        st.session_state.theme = "Light"
-
-    if st.session_state.get("theme") == "Dark":
-        st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
-
     game_state = get_game_state()
     render_sidebar()
     base_prices = get_base_live_prices()
