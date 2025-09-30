@@ -35,6 +35,7 @@ SLIPPAGE_THRESHOLD = 10
 BASE_SLIPPAGE_RATE = 0.005
 MARGIN_REQUIREMENT = 0.2
 ADMIN_PASSWORD = "100370" # Set your admin password here
+BID_ASK_SPREAD = 0.001 # 0.1% spread
 
 # --- Game State Management (Singleton for Live Sync) ---
 class GameState:
@@ -55,6 +56,7 @@ class GameState:
         self.event_type = None
         self.event_end = 0
         self.volatility_multiplier = 1.0
+        self.news_feed = []
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices."""
@@ -228,9 +230,11 @@ def render_sidebar():
         if player_name and player_name.strip() and player_name not in game_state.players:
             starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
             game_state.players[player_name] = {
-                "mode": mode, "capital": starting_capital, "holdings": {}, "pnl": 0, "leverage": 1.0, 
-                "margin_calls": 0, "pending_orders": [], "algo": "Off", "custom_algos": {},
-                "slippage_multiplier": 0.5 if mode == "HFT" else 1.0
+                "name": player_name, "mode": mode, "capital": starting_capital, 
+                "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, 
+                "pending_orders": [], "algo": "Off", "custom_algos": {},
+                "slippage_multiplier": 0.5 if mode == "HFT" else 1.0,
+                "value_history": []
             }
             game_state.transactions[player_name] = []
             st.sidebar.success(f"{player_name} joined as {mode}!")
@@ -248,15 +252,21 @@ def render_sidebar():
         game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=default_duration_minutes, disabled=(game_state.game_status == "Running"))
 
         game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, getattr(game_state, 'volatility_multiplier', 1.0), 0.5)
+        
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Broadcast News")
+        news_headline = st.sidebar.text_input("News Headline")
+        news_impact = st.sidebar.selectbox("Market Impact", ["Bull Rally", "Flash Crash", "Banking Boost", "Sector Rotation"])
+        if st.sidebar.button("Publish News"):
+            if news_headline:
+                game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_headline}")
+                if len(game_state.news_feed) > 5: game_state.news_feed.pop()
+                game_state.event_type = news_impact
+                game_state.event_active = True
+                game_state.event_end = time.time() + 60
+                st.toast(f"News Published!", icon="📰")
+                st.rerun()
 
-        event_to_trigger = st.sidebar.selectbox("Trigger Market Event", ["None", "Flash Crash", "Bull Rally", "Banking Boost", "Sector Rotation"])
-        if event_to_trigger != "None":
-            game_state.event_type = event_to_trigger
-            game_state.event_active = True
-            game_state.event_end = time.time() + 60
-            st.toast(f"Admin triggered: {event_to_trigger}!", icon="⚡")
-            st.rerun()
-            
         st.sidebar.markdown("---")
         st.sidebar.subheader("Adjust Player Capital")
         if game_state.players:
@@ -305,6 +315,14 @@ def render_main_interface(prices):
     with col2: render_global_views(prices)
 
 def render_global_views(prices):
+    st.subheader("📰 Live News Feed")
+    game_state = get_game_state()
+    if game_state.news_feed:
+        for news in game_state.news_feed:
+            st.info(news)
+    else:
+        st.info("No market news at the moment.")
+
     st.subheader("Live Player Standings")
     render_leaderboard(prices)
     st.subheader("Live Market Feed")
@@ -361,14 +379,16 @@ def render_trade_interface(player_name, player, prices, disabled_status):
         
         with col2: qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"qty_{player_name}", disabled=disabled_status)
 
-        current_price = prices.get(symbol_choice, 0)
-        estimated_cost = current_price * qty
-        st.info(f"Current Price: {format_indian_currency(current_price)} | Estimated Cost: {format_indian_currency(estimated_cost)}")
+        mid_price = prices.get(symbol_choice, 0)
+        ask_price = mid_price * (1 + BID_ASK_SPREAD / 2)
+        bid_price = mid_price * (1 - BID_ASK_SPREAD / 2)
+        
+        st.info(f"Bid: {format_indian_currency(bid_price)} | Ask: {format_indian_currency(ask_price)}")
         
         b1, b2, b3 = st.columns(3)
-        if b1.button(f"Buy {qty} {symbol_choice.split('-')[0].split('.')[0]}", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"): execute_trade(player_name, player, "Buy", symbol_choice, qty, prices); st.rerun()
-        if b2.button(f"Sell {qty} {symbol_choice.split('-')[0].split('.')[0]}", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status): execute_trade(player_name, player, "Sell", symbol_choice, qty, prices); st.rerun()
-        if b3.button(f"Short {qty} {symbol_choice.split('-')[0].split('.')[0]}", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status): execute_trade(player_name, player, "Short", symbol_choice, qty, prices); st.rerun()
+        if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"): execute_trade(player_name, player, "Buy", symbol_choice, qty, prices); st.rerun()
+        if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status): execute_trade(player_name, player, "Sell", symbol_choice, qty, prices); st.rerun()
+        if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status): execute_trade(player_name, player, "Short", symbol_choice, qty, prices); st.rerun()
             
     st.markdown("---"); render_current_holdings(player, prices)
 
@@ -398,12 +418,17 @@ def render_algo_trading_tab(player_name, player, disabled_status):
             else: st.error("Strategy name cannot be empty.")
 
 def render_current_holdings(player, prices):
-    st.subheader("💼 Current Holdings")
+    st.subheader("💼 Portfolio Allocation")
     if player['holdings']:
-        holdings_data = [{"Symbol": sym, "Quantity": qty, "Value": prices.get(sym, 0) * qty} for sym, qty in player['holdings'].items()]
-        st.dataframe(pd.DataFrame(holdings_data).style.format(formatter={"Value": format_indian_currency}), use_container_width=True)
-    else: st.info("No holdings yet.")
-        
+        holdings_data = [{"Symbol": sym, "Value": prices.get(sym, 0) * qty} for sym, qty in player['holdings'].items()]
+        holdings_df = pd.DataFrame(holdings_data)
+
+        fig = go.Figure(data=[go.Pie(labels=holdings_df['Symbol'], values=holdings_df['Value'], hole=.3)])
+        fig.update_layout(showlegend=False, height=200, margin=dict(l=20, r=20, t=20, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+    else: 
+        st.info("No holdings yet.")
+
 def render_transaction_history(player_name):
     game_state = get_game_state()
     st.subheader("Transaction History")
@@ -444,10 +469,16 @@ def render_optimizer(holdings):
         else: st.error(performance)
 
 def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False):
-    base_price = prices.get(symbol, 0)
-    if base_price == 0: return False
+    mid_price = prices.get(symbol, 0)
+    if mid_price == 0: return False
+
+    if action == "Buy":
+        trade_price = mid_price * (1 + BID_ASK_SPREAD / 2)
+    else: # Sell or Short
+        trade_price = mid_price * (1 - BID_ASK_SPREAD / 2)
     
-    trade_price = base_price * calculate_slippage(player, symbol, qty, action); cost = trade_price * qty
+    trade_price *= calculate_slippage(player, symbol, qty, action)
+    cost = trade_price * qty
     
     trade_executed = False
     if action == "Buy" and player['capital'] >= cost:
@@ -473,17 +504,24 @@ def log_transaction(player_name, action, symbol, qty, price, total, is_algo=Fals
     if not is_algo: st.success(f"Trade Executed: {action} {qty} {symbol} @ {format_indian_currency(price)}")
     else: st.toast(f"Algo Trade: {action} {qty} {symbol}", icon="🤖")
 
+def calculate_sharpe_ratio(value_history):
+    if len(value_history) < 2: return 0.0
+    returns = pd.Series(value_history).pct_change().dropna()
+    if returns.std() == 0: return 0.0
+    return (returns.mean() / returns.std()) * np.sqrt(252) # Annualized
+
 def render_leaderboard(prices):
     game_state = get_game_state()
     lb = []
     for pname, pdata in game_state.players.items():
         holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in pdata['holdings'].items())
         total_value = pdata['capital'] + holdings_value
-        lb.append((pname, pdata['mode'], total_value, pdata['pnl']))
+        sharpe_ratio = calculate_sharpe_ratio(pdata.get('value_history', []))
+        lb.append((pname, pdata['mode'], total_value, pdata['pnl'], sharpe_ratio))
     
     if lb:
-        lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L"]).sort_values("Portfolio Value", ascending=False).reset_index(drop=True)
-        st.dataframe(lb_df.style.format(formatter={"Portfolio Value": format_indian_currency, "P&L": format_indian_currency}), use_container_width=True)
+        lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L", "Sharpe Ratio"]).sort_values("Portfolio Value", ascending=False).reset_index(drop=True)
+        st.dataframe(lb_df.style.format(formatter={"Portfolio Value": format_indian_currency, "P&L": format_indian_currency, "Sharpe Ratio": "{:.2f}"}), use_container_width=True)
         
         if game_state.game_status == "Finished":
             st.balloons(); winner = lb_df.iloc[0]
@@ -491,7 +529,9 @@ def render_leaderboard(prices):
             c1, c2 = st.columns(2)
             c1.metric("🏆 Final Portfolio Value", format_indian_currency(winner['Portfolio Value']))
             c2.metric("💰 Total P&L", format_indian_currency(winner['P&L']))
-            st.subheader("Final Top 3 Standings:"); st.table(lb_df.head(3))
+
+            prudent_winner = lb_df.sort_values("Sharpe Ratio", ascending=False).iloc[0]
+            st.info(f"🧐 The Prudent Investor Award goes to {prudent_winner['Player']} with a Sharpe Ratio of {prudent_winner['Sharpe Ratio']:.2f}!")
 
 def render_live_market_table(prices):
     game_state = get_game_state(); prices_df = pd.DataFrame(prices.items(), columns=['Symbol', 'Price'])
@@ -517,6 +557,7 @@ def render_live_market_table(prices):
 def run_game_tick(prices):
     game_state = get_game_state()
     if game_state.game_status != "Running": return prices
+    
     if not game_state.event_active and random.random() < 0.01:
         events = ["Flash Crash", "Bull Rally", "Banking Boost", "Sector Rotation"]
         game_state.event_type = random.choice(events); game_state.event_active = True
@@ -524,8 +565,16 @@ def run_game_tick(prices):
     if game_state.event_active and time.time() >= game_state.event_end:
         game_state.event_active = False; st.info("Market event has ended.")
     if game_state.event_active: prices = apply_event_adjustment(prices, game_state.event_type)
+    
     handle_futures_expiry(prices)
     run_algo_strategies(prices)
+
+    # Record portfolio value history for Sharpe Ratio calculation
+    for player in game_state.players.values():
+        holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
+        total_value = player['capital'] + holdings_value
+        player['value_history'].append(total_value)
+        
     return prices
 
 def handle_futures_expiry(prices):
@@ -538,7 +587,7 @@ def handle_futures_expiry(prices):
                 if symbol in player['holdings']:
                     qty = player['holdings'][symbol]
                     settlement_price = settlement_prices.get(symbol, 0)
-                    pnl = (settlement_price - prices.get(symbol, 0)) * qty # Simplified PnL
+                    pnl = (settlement_price - prices.get(symbol, 0)) * qty
                     player['capital'] += pnl
                     log_transaction(name, "Futures Settlement", symbol, qty, settlement_price, pnl)
                     del player['holdings'][symbol]
@@ -577,11 +626,18 @@ def main():
     render_sidebar()
     
     # --- Main Price Flow ---
-    # 1. Get real-time base prices for stocks, crypto, gold, and indices
-    real_prices = get_real_market_prices()
+    # Fetch base prices only if they haven't been fetched for the day
+    if not game_state.base_real_prices:
+        game_state.base_real_prices = get_daily_base_prices()
+
+    # Use the last known price or the daily base price to start the tick simulation
+    last_prices = game_state.prices if game_state.prices else game_state.base_real_prices
     
-    # 2. Calculate prices for simulated assets (Futures, ETFs, Options) based on real prices
-    prices_with_derivatives = calculate_derived_prices(real_prices)
+    # 1. Simulate small price fluctuations for the current tick
+    current_prices = simulate_tick_prices(last_prices)
+    
+    # 2. Calculate prices for simulated assets (Futures, ETFs, Options) based on the new simulated prices
+    prices_with_derivatives = calculate_derived_prices(current_prices)
     
     # 3. Apply temporary simulation effects like market events
     final_prices = run_game_tick(prices_with_derivatives)
@@ -589,14 +645,12 @@ def main():
     game_state.prices = final_prices
     
     if not isinstance(game_state.price_history, list): game_state.price_history = []
-    # Store the final prices (with event effects) in history for change calculations
     game_state.price_history.append(final_prices)
     if len(game_state.price_history) > 10: game_state.price_history.pop(0)
     
     render_main_interface(final_prices)
     
     if game_state.game_status == "Running": 
-        # Optimized refresh rate for rapid UI processing
         time.sleep(2)
         st.rerun()
 
