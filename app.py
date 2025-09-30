@@ -388,10 +388,7 @@ def render_market_sentiment_meter():
         overall_sentiment = np.mean(sentiments)
     
     # Normalize sentiment to 0-100 scale
-    # Raw sentiment is roughly -5 to 5, let's cap it for the gauge
     normalized_sentiment = np.clip((overall_sentiment + 5) * 10, 0, 100)
-    
-    color = "green" if normalized_sentiment > 60 else "red" if normalized_sentiment < 40 else "orange"
     
     st.markdown("##### Market Sentiment")
     st.progress(int(normalized_sentiment))
@@ -433,45 +430,77 @@ def render_trade_execution_panel(prices):
 
 def render_trade_interface(player_name, player, prices, disabled_status):
     with st.container(border=True):
-        asset_types = ["Stock", "Crypto", "Gold", "Futures", "Leveraged ETF", "Option"]
-        asset_type = st.radio("Asset Type", asset_types, horizontal=True, key=f"asset_{player_name}", disabled=disabled_status)
+        order_type_tabs = ["Market", "Limit", "Stop-Loss"]
+        market_tab, limit_tab, stop_loss_tab = st.tabs(order_type_tabs)
 
-        if asset_type == "Futures" and getattr(get_game_state(), 'futures_expiry_time', 0) > 0:
-            expiry_remaining = max(0, get_game_state().futures_expiry_time - time.time())
-            st.warning(f"Futures contracts expire and will be cash-settled in **{int(expiry_remaining // 60)}m {int(expiry_remaining % 60)}s**")
+        with market_tab:
+            render_market_order_ui(player_name, player, prices, disabled_status)
 
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            if asset_type == "Stock": symbol_choice = st.selectbox("Stock", [s.replace('.NS', '') for s in NIFTY50_SYMBOLS], key=f"stock_{player_name}", disabled=disabled_status) + '.NS'
-            elif asset_type == "Crypto": symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"crypto_{player_name}", disabled=disabled_status)
-            elif asset_type == "Gold": symbol_choice = GOLD_SYMBOL
-            elif asset_type == "Futures": symbol_choice = st.selectbox("Futures", FUTURES_SYMBOLS, key=f"futures_{player_name}", disabled=disabled_status)
-            elif asset_type == "Leveraged ETF": symbol_choice = st.selectbox("Leveraged ETF", LEVERAGED_ETFS, key=f"letf_{player_name}", disabled=disabled_status)
-            else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"option_{player_name}", disabled=disabled_status)
+        with limit_tab:
+            render_limit_order_ui(player_name, player, prices, disabled_status)
         
-        with col2: qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"qty_{player_name}", disabled=disabled_status)
+        with stop_loss_tab:
+            render_stop_loss_order_ui(player_name, player, prices, disabled_status)
 
-        mid_price = prices.get(symbol_choice, 0)
-        ask_price = mid_price * (1 + BID_ASK_SPREAD / 2)
-        bid_price = mid_price * (1 - BID_ASK_SPREAD / 2)
-        
-        st.info(f"Bid: {format_indian_currency(bid_price)} | Ask: {format_indian_currency(ask_price)}")
-        
-        b1, b2, b3 = st.columns(3)
-        if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"): 
-            if execute_trade(player_name, player, "Buy", symbol_choice, qty, prices): play_sound('success')
-            else: play_sound('error')
-            st.rerun()
-        if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status): 
-            if execute_trade(player_name, player, "Sell", symbol_choice, qty, prices): play_sound('success')
-            else: play_sound('error')
-            st.rerun()
-        if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status): 
-            if execute_trade(player_name, player, "Short", symbol_choice, qty, prices): play_sound('success')
-            else: play_sound('error')
-            st.rerun()
-            
-    st.markdown("---"); render_current_holdings(player, prices)
+    st.markdown("---")
+    render_current_holdings(player, prices)
+    render_pending_orders(player)
+
+def render_market_order_ui(player_name, player, prices, disabled_status):
+    asset_types = ["Stock", "Crypto", "Gold", "Futures", "Leveraged ETF", "Option"]
+    asset_type = st.radio("Asset Type", asset_types, horizontal=True, key=f"market_asset_{player_name}", disabled=disabled_status)
+    
+    if asset_type == "Futures" and getattr(get_game_state(), 'futures_expiry_time', 0) > 0:
+        expiry_remaining = max(0, get_game_state().futures_expiry_time - time.time())
+        st.warning(f"Futures expire in **{int(expiry_remaining // 60)}m {int(expiry_remaining % 60)}s**")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if asset_type == "Stock": symbol_choice = st.selectbox("Stock", [s.replace('.NS', '') for s in NIFTY50_SYMBOLS], key=f"market_stock_{player_name}", disabled=disabled_status) + '.NS'
+        elif asset_type == "Crypto": symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"market_crypto_{player_name}", disabled=disabled_status)
+        elif asset_type == "Gold": symbol_choice = GOLD_SYMBOL
+        elif asset_type == "Futures": symbol_choice = st.selectbox("Futures", FUTURES_SYMBOLS, key=f"market_futures_{player_name}", disabled=disabled_status)
+        elif asset_type == "Leveraged ETF": symbol_choice = st.selectbox("Leveraged ETF", LEVERAGED_ETFS, key=f"market_letf_{player_name}", disabled=disabled_status)
+        else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"market_option_{player_name}", disabled=disabled_status)
+    with col2:
+        qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"market_qty_{player_name}", disabled=disabled_status)
+    
+    mid_price = prices.get(symbol_choice, 0)
+    ask_price = mid_price * (1 + BID_ASK_SPREAD / 2)
+    bid_price = mid_price * (1 - BID_ASK_SPREAD / 2)
+    st.info(f"Bid: {format_indian_currency(bid_price)} | Ask: {format_indian_currency(ask_price)}")
+
+    b1, b2, b3 = st.columns(3)
+    if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"): 
+        if execute_trade(player_name, player, "Buy", symbol_choice, qty, prices): play_sound('success')
+        else: play_sound('error')
+        st.rerun()
+    if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status): 
+        if execute_trade(player_name, player, "Sell", symbol_choice, qty, prices): play_sound('success')
+        else: play_sound('error')
+        st.rerun()
+    if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status): 
+        if execute_trade(player_name, player, "Short", symbol_choice, qty, prices): play_sound('success')
+        else: play_sound('error')
+        st.rerun()
+
+def render_limit_order_ui(player_name, player, prices, disabled_status):
+    st.write("Set a price to automatically buy or sell an asset.")
+    # UI for Limit order
+    pass # Placeholder for Limit Order UI
+
+def render_stop_loss_order_ui(player_name, player, prices, disabled_status):
+    st.write("Set a price to automatically sell an asset if it drops, to limit losses.")
+    # UI for Stop-Loss order
+    pass # Placeholder for Stop-Loss Order UI
+
+def render_pending_orders(player):
+    st.subheader("🕒 Pending Orders")
+    if player['pending_orders']:
+        orders_df = pd.DataFrame(player['pending_orders'])
+        st.dataframe(orders_df, use_container_width=True)
+    else:
+        st.info("No pending orders.")
 
 def render_algo_trading_tab(player_name, player, disabled_status):
     st.subheader("Automated Trading Strategies")
@@ -509,7 +538,7 @@ def render_current_holdings(player, prices):
         st.plotly_chart(fig, use_container_width=True)
     else: 
         st.info("No holdings yet.")
-
+        
 def render_transaction_history(player_name):
     game_state = get_game_state()
     st.subheader("Transaction History")
@@ -549,7 +578,7 @@ def render_optimizer(holdings):
             if performance: st.write(f"Expected Return: {performance[0]:.2%}, Volatility: {performance[1]:.2%}, Sharpe Ratio: {performance[2]:.2f}")
         else: st.error(performance)
 
-def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False):
+def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False, order_type="Market"):
     mid_price = prices.get(symbol, 0)
     if mid_price == 0: return False
 
@@ -576,7 +605,7 @@ def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=Fals
     
     if trade_executed: 
         get_game_state().market_sentiment[symbol] = get_game_state().market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
-        log_transaction(player_name, action, symbol, qty, trade_price, cost, is_algo)
+        log_transaction(player_name, f"{order_type} {action}", symbol, qty, trade_price, cost, is_algo)
     elif not is_algo: 
         st.error("Trade failed: Insufficient capital or holdings.")
     return trade_executed
@@ -585,8 +614,12 @@ def log_transaction(player_name, action, symbol, qty, price, total, is_algo=Fals
     game_state = get_game_state()
     prefix = "🤖 Algo" if is_algo else ""
     game_state.transactions.setdefault(player_name, []).append([time.strftime("%H:%M:%S"), f"{prefix} {action}".strip(), symbol, qty, price, total])
-    if not is_algo: st.success(f"Trade Executed: {action} {qty} {symbol} @ {format_indian_currency(price)}")
-    else: st.toast(f"Algo Trade: {action} {qty} {symbol}", icon="🤖")
+    if "Auto-Liquidation" in action or "Settlement" in action:
+        st.toast(f"{action}: {qty} {symbol}", icon="⚠️")
+    elif not is_algo: 
+        st.success(f"Trade Executed: {action} {qty} {symbol} @ {format_indian_currency(price)}")
+    else: 
+        st.toast(f"Algo Trade: {action} {qty} {symbol}", icon="🤖")
 
 def calculate_sharpe_ratio(value_history):
     if len(value_history) < 2: return 0.0
@@ -686,6 +719,7 @@ def run_game_tick(prices):
             prices = apply_event_adjustment(prices, game_state.event_type)
     
     handle_futures_expiry(prices)
+    check_margin_calls_and_orders(prices)
     run_algo_strategies(prices)
 
     # Record portfolio value history for Sharpe Ratio calculation
@@ -731,6 +765,47 @@ def handle_futures_expiry(prices):
                     del player['holdings'][symbol]
         game_state.futures_settled = True
 
+def check_margin_calls_and_orders(prices):
+    game_state = get_game_state()
+    for name, player in game_state.players.items():
+        # Margin Call Logic
+        holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
+        total_value = player['capital'] + holdings_value
+        margin_needed = abs(holdings_value) * MARGIN_REQUIREMENT
+
+        if total_value < margin_needed and player['holdings']:
+            player['margin_calls'] += 1
+            st.warning(f"MARGIN CALL for {name}! Liquidating largest position.")
+            
+            # Find largest position by absolute value to liquidate
+            largest_position = max(player['holdings'].items(), key=lambda item: abs(item[1] * prices.get(item[0], 0)), default=(None, 0))
+            if largest_position[0]:
+                symbol_to_liquidate, qty_to_liquidate = largest_position
+                action = "Sell" if qty_to_liquidate > 0 else "Buy"
+                execute_trade(name, player, action, symbol_to_liquidate, abs(qty_to_liquidate), prices, order_type="Auto-Liquidation")
+
+        # Pending Orders Logic
+        orders_to_remove = []
+        for i, order in enumerate(player['pending_orders']):
+            current_price = prices.get(order['symbol'], 0)
+            if current_price == 0: continue
+            
+            order_executed = False
+            if order['type'] == 'Limit' and order['action'] == 'Buy' and current_price <= order['price']:
+                order_executed = execute_trade(name, player, 'Buy', order['symbol'], order['qty'], prices, order_type="Limit")
+            elif order['type'] == 'Limit' and order['action'] == 'Sell' and current_price >= order['price']:
+                order_executed = execute_trade(name, player, 'Sell', order['symbol'], order['qty'], prices, order_type="Limit")
+            elif order['type'] == 'Stop-Loss' and current_price <= order['price']:
+                order_executed = execute_trade(name, player, 'Sell', order['symbol'], order['qty'], prices, order_type="Stop-Loss")
+            
+            if order_executed:
+                orders_to_remove.append(i)
+        
+        # Remove executed orders
+        for i in sorted(orders_to_remove, reverse=True):
+            del player['pending_orders'][i]
+
+
 def run_algo_strategies(prices):
     game_state = get_game_state()
     if len(game_state.price_history) < 2: return
@@ -748,12 +823,14 @@ def run_algo_strategies(prices):
                             (strategy['condition'] == 'Less Than' and indicator_val < strategy['threshold'])
             if condition_met: execute_trade(name, player, strategy['action'], trade_symbol, 1, prices, is_algo=True)
         else: # Default Algos
-            price_change = prices[trade_symbol] - prev_prices.get(trade_symbol, prices[trade_symbol])
+            price_change = prices.get(trade_symbol, 0) - prev_prices.get(trade_symbol, prices.get(trade_symbol, 0))
+            if prices.get(trade_symbol, 0) == 0: continue
+
             if active_algo == "Momentum Trader" and abs(price_change / prices[trade_symbol]) > 0.001:
                 execute_trade(name, player, "Buy" if price_change > 0 else "Sell", trade_symbol, 1, prices, is_algo=True)
             elif active_algo == "Mean Reversion" and abs(price_change / prices[trade_symbol]) > 0.001:
                 execute_trade(name, player, "Sell" if price_change > 0 else "Buy", trade_symbol, 1, prices, is_algo=True)
-            elif active_algo == "Volatility Breakout" and abs((price_change) / prices[trade_symbol]) * 100 > 0.1:
+            elif active_algo == "Volatility Breakout" and abs(price_change / prices[trade_symbol]) * 100 > 0.1:
                 execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
             elif active_algo == "Value Investor":
                 change_30_day = calculate_indicator("Price Change % (30-day)", trade_symbol)
