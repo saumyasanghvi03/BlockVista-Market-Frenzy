@@ -141,6 +141,23 @@ def optimize_portfolio(player_holdings):
     except Exception as e:
         return None, f"Optimization failed: {e}"
 
+def calculate_indicator(indicator, symbol):
+    """Calculates the value of a technical indicator for a given symbol."""
+    hist = get_historical_data([symbol], period="1mo")
+    if hist.empty or len(hist) < 10: return None
+    
+    if indicator == "Price Change % (5-day)":
+        if len(hist) < 5: return None
+        price_now = hist[symbol].iloc[-1]
+        price_then = hist[symbol].iloc[-6]
+        return ((price_now - price_then) / price_then) * 100
+    
+    elif indicator == "SMA Crossover (10/20)":
+        sma_10 = hist[symbol].rolling(window=10).mean().iloc[-1]
+        sma_20 = hist[symbol].rolling(window=20).mean().iloc[-1]
+        return sma_10 - sma_20 # Positive if short SMA is above long SMA (bullish)
+    return None
+
 # --- Game State Initialization ---
 def init_game_state():
     if "players" not in st.session_state: st.session_state.players = {}
@@ -166,7 +183,8 @@ def render_sidebar():
         if player_name and player_name.strip() and player_name not in st.session_state.players:
             st.session_state.players[player_name] = {
                 "mode": mode, "capital": INITIAL_CAPITAL, "holdings": {}, "pnl": 0,
-                "leverage": 1.0, "margin_calls": 0, "pending_orders": [], "algo": "Off"
+                "leverage": 1.0, "margin_calls": 0, "pending_orders": [], "algo": "Off",
+                "custom_algos": {}
             }
             st.session_state.transactions[player_name] = []
             st.sidebar.success(f"{player_name} joined as {mode}!")
@@ -188,7 +206,7 @@ def render_sidebar():
         
     if st.sidebar.button("🔄 Reset Game"):
         for player in st.session_state.players.values():
-            player.update({"capital": INITIAL_CAPITAL, "holdings": {}, "pnl": 0, "pending_orders": [], "algo": "Off"})
+            player.update({"capital": INITIAL_CAPITAL, "holdings": {}, "pnl": 0, "pending_orders": [], "algo": "Off", "custom_algos": {}})
         st.session_state.game_status = "Stopped"
         st.session_state.game_start_time = 0
         st.toast("Game has been reset.", icon="🔄")
@@ -286,23 +304,52 @@ def render_trade_interface(player_name, player, prices, disabled_status):
 def render_algo_trading_tab(player_name, player, disabled_status):
     st.subheader("Automated Trading Strategies")
     st.write("Activate an algorithm to trade automatically on your behalf.")
+
+    # --- Strategy Selection ---
+    default_strats = ["Off", "Momentum Trader", "Mean Reversion"]
+    custom_strats = list(player.get('custom_algos', {}).keys())
+    all_strats = default_strats + custom_strats
+    
+    active_algo = player.get('algo', 'Off')
     
     algo_choice = st.selectbox(
         "Choose Strategy",
-        ["Off", "Momentum Trader", "Mean Reversion"],
-        index=["Off", "Momentum Trader", "Mean Reversion"].index(player.get('algo', 'Off')),
+        all_strats,
+        index=all_strats.index(active_algo) if active_algo in all_strats else 0,
         disabled=not disabled_status,
         key=f"algo_{player_name}"
     )
     player['algo'] = algo_choice
-
-    if player['algo'] == "Momentum Trader":
-        st.info("This bot buys assets that have risen in price and sells those that have fallen, betting that trends will continue.")
-    elif player['algo'] == "Mean Reversion":
-        st.info("This bot buys assets that have fallen, expecting them to 'revert' back to their average price, and sells assets that have risen.")
     
-    if player['algo'] != "Off":
-        st.success(f"'{player['algo']}' is now active!")
+    # --- Strategy Explanation ---
+    if player['algo'] == "Momentum Trader":
+        st.info("This bot buys assets that have risen and sells those that have fallen.")
+    elif player['algo'] == "Mean Reversion":
+        st.info("This bot buys assets that have fallen and sells those that have risen.")
+    elif player['algo'] in custom_strats:
+        st.info(f"Custom strategy '{player['algo']}' is active.")
+
+    # --- Custom Strategy Creator ---
+    with st.expander("Create Custom Strategy"):
+        st.markdown("##### Define Your Own Algorithm")
+        c1, c2 = st.columns(2)
+        with c1:
+            algo_name = st.text_input("Strategy Name", key=f"algo_name_{player_name}")
+            indicator = st.selectbox("Indicator", ["Price Change % (5-day)", "SMA Crossover (10/20)"], key=f"indicator_{player_name}")
+            condition = st.selectbox("Condition", ["Greater Than", "Less Than"], key=f"condition_{player_name}")
+        with c2:
+            threshold = st.number_input("Threshold Value", value=0.0, step=0.1, key=f"threshold_{player_name}")
+            action = st.radio("Action if True", ["Buy", "Sell"], key=f"algo_action_{player_name}")
+
+        if st.button("Save Strategy", key=f"save_algo_{player_name}"):
+            if algo_name.strip():
+                player['custom_algos'][algo_name] = {
+                    "indicator": indicator, "condition": condition,
+                    "threshold": threshold, "action": action
+                }
+                st.success(f"Custom strategy '{algo_name}' saved!")
+            else:
+                st.error("Strategy name cannot be empty.")
 
 def render_holdings_and_history(player_name, player, prices):
     st.subheader("Current Holdings")
@@ -469,22 +516,40 @@ def run_game_tick(prices):
 
 def run_algo_strategies(prices):
     if not st.session_state.price_history: return
-
     prev_prices = st.session_state.price_history[-1]
     
     for name, player in st.session_state.players.items():
-        if player.get('algo', 'Off') == 'Off': continue
-        
+        active_algo = player.get('algo', 'Off')
+        if active_algo == 'Off':
+            continue
+
         trade_symbol = random.choice(NIFTY50_SYMBOLS + CRYPTO_SYMBOLS)
         price_change = prices[trade_symbol] - prev_prices.get(trade_symbol, prices[trade_symbol])
         
-        if player.get('algo', 'Off') == "Momentum Trader" and abs(price_change) > 0.1:
-            if price_change > 0: execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
-            else: execute_trade(name, player, "Sell", trade_symbol, 1, prices, is_algo=True)
+        # --- Default Algos ---
+        if active_algo == "Momentum Trader" and abs(price_change) > 0.1:
+            action = "Buy" if price_change > 0 else "Sell"
+            execute_trade(name, player, action, trade_symbol, 1, prices, is_algo=True)
                 
-        elif player.get('algo', 'Off') == "Mean Reversion" and abs(price_change) > 0.1:
-            if price_change > 0: execute_trade(name, player, "Sell", trade_symbol, 1, prices, is_algo=True)
-            else: execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
+        elif active_algo == "Mean Reversion" and abs(price_change) > 0.1:
+            action = "Sell" if price_change > 0 else "Buy"
+            execute_trade(name, player, action, trade_symbol, 1, prices, is_algo=True)
+        
+        # --- Custom Algos ---
+        elif active_algo in player.get('custom_algos', {}):
+            strategy = player['custom_algos'][active_algo]
+            indicator_val = calculate_indicator(strategy['indicator'], trade_symbol)
+            if indicator_val is None: continue
+
+            condition_met = False
+            if strategy['condition'] == 'Greater Than' and indicator_val > strategy['threshold']:
+                condition_met = True
+            elif strategy['condition'] == 'Less Than' and indicator_val < strategy['threshold']:
+                condition_met = True
+            
+            if condition_met:
+                execute_trade(name, player, strategy['action'], trade_symbol, 1, prices, is_algo=True)
+
 
 # --- Main App ---
 def main():
