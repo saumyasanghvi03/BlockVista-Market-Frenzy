@@ -5,4 +5,4 @@ matplotlib
 requests
 alpha-vantage
 plotly
-pypfopt
+PyPortfolioOpt
