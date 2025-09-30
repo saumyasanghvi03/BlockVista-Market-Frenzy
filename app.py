@@ -8,7 +8,6 @@ import random
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import numpy as np
-from alpha_vantage.timeseries import TimeSeries
 from pypfopt import EfficientFrontier, risk_models, expected_returns
 
 # --- API & Game Configuration ---
@@ -16,15 +15,12 @@ GAME_NAME = "BlockVista Market Frenzy"
 INITIAL_CAPITAL = 1000000  # ₹10 lakh
 ROUND_DURATION = 20 * 60   # 20 minutes in seconds
 
-# Store API key in Streamlit secrets
-ALPHA_VANTAGE_API_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "YOUR_API_KEY")
-
 # Define asset symbols
 NIFTY50_SYMBOLS = ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'TCS.NS',
                    'KOTAKBANK.NS', 'SBIN.NS', 'ITC.NS', 'ASIANPAINT.NS', 'AXISBANK.NS']
 CRYPTO_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD']
 GOLD_SYMBOL = 'GC=F'
-NIFTY_INDEX_SYMBOL = 'NSEI' # Adjusted for Alpha Vantage query
+NIFTY_INDEX_SYMBOL = '^NSEI' # yfinance symbol for Nifty 50 Index
 OPTION_SYMBOLS = ['NIFTY_CALL', 'NIFTY_PUT']
 
 ALL_SYMBOLS = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL] + OPTION_SYMBOLS
@@ -51,31 +47,24 @@ QUIZ_QUESTIONS = [
 def get_live_prices():
     prices = {}
     
-    # Fetch Nifty50, Crypto, and Gold using yfinance
-    yf_symbols = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL]
+    # Fetch Nifty50, Crypto, Gold, and Nifty Index using yfinance
+    yf_symbols = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL, NIFTY_INDEX_SYMBOL]
     try:
         data = yf.download(tickers=yf_symbols, period="1d", interval="1m", progress=False)
         for symbol in yf_symbols:
             if not data.empty and symbol in data['Close'] and not pd.isna(data['Close'][symbol].iloc[-1]):
                 prices[symbol] = data['Close'][symbol].iloc[-1]
             else: # Fallback for failed fetch
-                prices[symbol] = random.uniform(10, 5000)
+                is_index = symbol == NIFTY_INDEX_SYMBOL
+                prices[symbol] = random.uniform(18000, 22000) if is_index else random.uniform(10, 5000)
     except Exception as e:
-        st.warning(f"yfinance fetch failed: {e}. Using random data for stocks/crypto.")
+        st.warning(f"yfinance fetch failed: {e}. Using random data for all assets.")
         for symbol in yf_symbols:
-            prices[symbol] = random.uniform(10, 5000)
+            is_index = symbol == NIFTY_INDEX_SYMBOL
+            prices[symbol] = random.uniform(18000, 22000) if is_index else random.uniform(10, 5000)
 
-    # Fetch Nifty Index using Alpha Vantage
-    try:
-        ts = TimeSeries(key=ALPHA_VANTAGE_API_KEY, output_format='pandas')
-        data, _ = ts.get_quote_endpoint(symbol=NIFTY_INDEX_SYMBOL)
-        prices['^NSEI'] = float(data['05. price'].iloc[0])
-    except Exception as e:
-        st.warning(f"Alpha Vantage API error: {e}. Using fallback for Nifty index.")
-        prices['^NSEI'] = random.uniform(18000, 22000)
-        
     # Mock options based on Nifty
-    nifty_price = prices.get('^NSEI', 20000)
+    nifty_price = prices.get(NIFTY_INDEX_SYMBOL, 20000)
     prices['NIFTY_CALL'] = nifty_price * 1.02
     prices['NIFTY_PUT'] = nifty_price * 0.98
     
