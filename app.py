@@ -31,7 +31,7 @@ ALL_SYMBOLS = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL] + OPTION_SYMBOLS
 SLIPPAGE_THRESHOLD = 10
 BASE_SLIPPAGE_RATE = 0.005
 MARGIN_REQUIREMENT = 0.2
-ADMIN_PASSWORD = "admin123" # Set your admin password here
+ADMIN_PASSWORD = "100370" # Set your admin password here
 
 # --- Game State Management (Singleton for Live Sync) ---
 class GameState:
