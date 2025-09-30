@@ -93,24 +93,32 @@ def play_sound(sound_type):
     if sound_type == 'success':
         js = """
         <script>
-            const synth = new Tone.Synth().toDestination();
-            synth.triggerAttackRelease("C5", "8n");
+            if (typeof Tone !== 'undefined') {
+                const synth = new Tone.Synth().toDestination();
+                synth.triggerAttackRelease("C5", "8n");
+            }
         </script>
         """
     elif sound_type == 'error':
         js = """
         <script>
-            const synth = new Tone.Synth().toDestination();
-            synth.triggerAttackRelease("C3", "8n");
+            if (typeof Tone !== 'undefined') {
+                const synth = new Tone.Synth().toDestination();
+                synth.triggerAttackRelease("C3", "8n");
+            }
         </script>
         """
-    elif sound_type == 'news':
-        js = """
-        <script>
-            const synth = new Tone.Synth().toDestination();
-            synth.triggerAttackRelease("G4", "8n");
-        </script>
-        """
+    st.components.v1.html(js, height=0)
+
+def announce_news(headline):
+    """Embeds HTML to play a TTS announcement of the news headline."""
+    safe_headline = headline.replace("'", "\\'").replace("\n", " ")
+    js = f"""
+    <script>
+        const utterance = new SpeechSynthesisUtterance('{safe_headline}');
+        speechSynthesis.speak(utterance);
+    </script>
+    """
     st.components.v1.html(js, height=0)
 
 
@@ -315,7 +323,7 @@ def render_sidebar():
                     game_state.event_type = selected_news['impact']
                     game_state.event_active = True
                     game_state.event_end = time.time() + 60
-                    st.toast(f"News Published!", icon="📰"); play_sound('news')
+                    st.toast(f"News Published!", icon="📰"); announce_news(selected_news['headline'])
                     st.rerun()
 
         st.sidebar.markdown("---")
@@ -705,7 +713,7 @@ def run_game_tick(prices):
             game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
             game_state.event_type = news_item['impact']; game_state.event_active = True
             game_state.event_end = time.time() + 60
-            game_state.powell_morning_triggered = True; play_sound('news')
+            game_state.powell_morning_triggered = True; announce_news(news_item['headline'])
 
     # Powell Afternoon Speech
     if not getattr(game_state, 'powell_afternoon_triggered', False) and elapsed_time > (game_state.round_duration_seconds - 120):
@@ -714,14 +722,14 @@ def run_game_tick(prices):
             game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
             game_state.event_type = news_item['impact']; game_state.event_active = True
             game_state.event_end = time.time() + 60
-            game_state.powell_afternoon_triggered = True; play_sound('news')
+            game_state.powell_afternoon_triggered = True; announce_news(news_item['headline'])
 
     if not game_state.event_active and random.random() < 0.05: 
         news_item = random.choice([n for n in PRE_BUILT_NEWS if "Powell" not in n['headline']])
         game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
         if len(game_state.news_feed) > 5: game_state.news_feed.pop()
         game_state.event_type = news_item['impact']; game_state.event_active = True
-        game_state.event_end = time.time() + random.randint(30, 60); st.toast(f"⚡ Market Event: {game_state.event_type}!", icon="🎉"); play_sound('news')
+        game_state.event_end = time.time() + random.randint(30, 60); st.toast(f"⚡ Market Event: {game_state.event_type}!", icon="🎉"); announce_news(news_item['headline'])
         
     if game_state.event_active and time.time() >= game_state.event_end:
         game_state.event_active = False; st.info("Market event has ended.")
