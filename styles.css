@@ -1,0 +1,49 @@
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #f5f5f5;
+}
+.section {
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #1f77b4;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+.metric {
+    font-size: 1.2em;
+    padding: 10px;
+    background-color: #e6f3ff;
+    border-radius: 5px;
+    margin: 5px 0;
+}
+.timer {
+    font-size: 1.3em;
+    color: #d62728;
+    font-weight: bold;
+    padding: 10px;
+    background-color: #ffe6e6;
+    border-radius: 5px;
+}
+.winner {
+    font-size: 1.2em;
+    color: #2ca02c;
+    padding: 5px;
+}
+.quiz {
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #4b0082;
+}
+.stButton>button {
+    background-color: #1f77b4;
+    color: white;
+    border-radius: 5px;
+    padding: 10px 20px;
+}
+.stButton>button:hover {
+    background-color: #135a8d;
+}
+.stSidebar {
+    background-color: #ffffff;
+    border-right: 1px solid #ddd;
+}
