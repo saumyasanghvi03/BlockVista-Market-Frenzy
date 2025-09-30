@@ -316,8 +316,9 @@ def render_main_interface(prices):
 def render_global_views(prices):
     st.subheader("📰 Live News Feed")
     game_state = get_game_state()
-    if game_state.news_feed:
-        for news in game_state.news_feed:
+    news_feed = getattr(game_state, 'news_feed', [])
+    if news_feed:
+        for news in news_feed:
             st.info(news)
     else:
         st.info("No market news at the moment.")
