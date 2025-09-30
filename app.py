@@ -40,17 +40,26 @@ SHORT_SQUEEZE_THRESHOLD = 5 # Number of players shorting to trigger potential sq
 
 # --- Pre-built News Headlines ---
 PRE_BUILT_NEWS = [
+    # India Specific
     {"headline": "Breaking: RBI unexpectedly cuts repo rate by 25 basis points!", "impact": "Bull Rally"},
-    {"headline": "Disappointing quarterly results from major IT firms weigh on the market.", "impact": "Flash Crash"},
     {"headline": "Government announces major infrastructure spending package, boosting banking stocks.", "impact": "Banking Boost"},
     {"headline": "Shocking fraud uncovered at a major private bank, sending shockwaves through the financial sector.", "impact": "Flash Crash"},
     {"headline": "Indian tech firm announces breakthrough in AI, sparking a rally in tech stocks.", "impact": "Sector Rotation"},
+    {"headline": "FIIs show renewed interest in Indian equities, leading to broad-based buying.", "impact": "Bull Rally"},
+    {"headline": "SEBI announces stricter margin rules for derivatives, market turns cautious.", "impact": "Flash Crash"},
+    {"headline": "Monsoon forecast revised upwards, boosting rural demand expectations.", "impact": "Bull Rally"},
+    
+    # Global News
+    {"headline": "Global News: US inflation data comes in hotter than expected, spooking global markets.", "impact": "Flash Crash"},
+    {"headline": "Global News: European Central Bank signals a dovish stance, boosting liquidity.", "impact": "Bull Rally"},
+    {"headline": "Global News: Major supply chain disruption reported in Asia, affecting global trade.", "impact": "Volatility Spike"},
+    {"headline": "Fed Chair Jerome Powell: 'The economy is resilient, but we remain watchful.'", "impact": "Volatility Spike"},
+    
+    # Symbol Specific
     {"headline": "{symbol} secures a massive government contract, sending its stock soaring!", "impact": "Symbol Bull Run"},
     {"headline": "Regulatory probe launched into {symbol} over accounting irregularities.", "impact": "Symbol Crash"},
     {"headline": "Government unexpectedly announces a ban on all private cryptocurrencies.", "impact": "Flash Crash"},
-    {"headline": "FIIs show renewed interest in Indian equities, leading to broad-based buying.", "impact": "Bull Rally"},
     {"headline": "New regulations announced for the tech sector; investors react cautiously.", "impact": "Sector Rotation"},
-    {"headline": "Fed Chair Jerome Powell: 'The economy is resilient, but we remain watchful.'", "impact": "Volatility Spike"},
 ]
 
 # --- Game State Management (Singleton for Live Sync) ---
@@ -71,6 +80,7 @@ class GameState:
         self.liquidity = {s: random.uniform(0.5, 1.0) for s in ALL_SYMBOLS}
         self.event_active = False
         self.event_type = None
+        self.event_target_symbol = None
         self.event_end = 0
         self.volatility_multiplier = 1.0
         self.news_feed = []
@@ -747,31 +757,25 @@ def run_game_tick(prices):
     for symbol in game_state.market_sentiment:
         game_state.market_sentiment[symbol] *= 0.95 
 
-    elapsed_time = time.time() - game_state.game_start_time
-    # Powell Morning Speech
-    if not getattr(game_state, 'powell_morning_triggered', False) and elapsed_time > 120:
-        news_item = next((news for news in PRE_BUILT_NEWS if "Good Morning" in news["headline"]), None)
-        if news_item:
-            game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
-            game_state.event_type = news_item['impact']; game_state.event_active = True
-            game_state.event_end = time.time() + 60
-            game_state.powell_morning_triggered = True; announce_news(news_item['headline'])
+    # Random News Event Trigger
+    if not game_state.event_active and random.random() < 0.07: # Increased frequency for 20 min session
+        news_item = random.choice(PRE_BUILT_NEWS)
+        headline = news_item['headline']
+        impact = news_item['impact']
+        target_symbol = None
 
-    # Powell Afternoon Speech
-    if not getattr(game_state, 'powell_afternoon_triggered', False) and elapsed_time > (game_state.round_duration_seconds - 120):
-        news_item = next((news for news in PRE_BUILT_NEWS if "Good Afternoon" in news["headline"]), None)
-        if news_item:
-            game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
-            game_state.event_type = news_item['impact']; game_state.event_active = True
-            game_state.event_end = time.time() + 60
-            game_state.powell_afternoon_triggered = True; announce_news(news_item['headline'])
-
-    if not game_state.event_active and random.random() < 0.05: 
-        news_item = random.choice([n for n in PRE_BUILT_NEWS if "Powell" not in n['headline']])
-        game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
+        if "{symbol}" in headline:
+            target_symbol = random.choice(NIFTY50_SYMBOLS)
+            headline = headline.format(symbol=target_symbol.replace(".NS", ""))
+        
+        game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {headline}")
         if len(game_state.news_feed) > 5: game_state.news_feed.pop()
-        game_state.event_type = news_item['impact']; game_state.event_active = True
-        game_state.event_end = time.time() + random.randint(30, 60); st.toast(f"⚡ Market Event: {game_state.event_type}!", icon="🎉"); announce_news(news_item['headline'])
+        
+        game_state.event_type = impact
+        game_state.event_target_symbol = target_symbol # Store target for apply_event_adjustment
+        game_state.event_active = True
+        game_state.event_end = time.time() + random.randint(30, 60)
+        st.toast(f"⚡ Market Event!", icon="🎉"); announce_news(headline)
         
     if game_state.event_active and time.time() >= game_state.event_end:
         game_state.event_active = False; st.info("Market event has ended.")
@@ -779,7 +783,7 @@ def run_game_tick(prices):
         if game_state.event_type == 'Volatility Spike':
             prices = {k: v * (1 + random.uniform(-0.01, 0.01) * 2) for k, v in prices.items()}
         else:
-            prices = apply_event_adjustment(prices, game_state.event_type)
+            prices = apply_event_adjustment(prices, game_state.event_type, getattr(game_state, 'event_target_symbol', None))
     
     handle_futures_expiry(prices)
     check_margin_calls_and_orders(prices)
