@@ -45,6 +45,8 @@ PRE_BUILT_NEWS = [
     {"headline": "Geopolitical tensions rise in the Middle East, causing market uncertainty.", "impact": "Flash Crash"},
     {"headline": "FIIs show renewed interest in Indian equities, leading to broad-based buying.", "impact": "Bull Rally"},
     {"headline": "New regulations announced for the tech sector; investors react cautiously.", "impact": "Sector Rotation"},
+    {"headline": "Fed Chair Jerome Powell: 'Good Morning, the economy is resilient, but we remain watchful.'", "impact": "Volatility Spike"},
+    {"headline": "Fed Chair Jerome Powell: 'Good Afternoon, we will continue to monitor the data closely.'", "impact": "Volatility Spike"},
 ]
 
 # --- Game State Management (Singleton for Live Sync) ---
@@ -68,6 +70,8 @@ class GameState:
         self.event_end = 0
         self.volatility_multiplier = 1.0
         self.news_feed = []
+        self.powell_morning_triggered = False
+        self.powell_afternoon_triggered = False
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices."""
@@ -80,6 +84,26 @@ class GameState:
 def get_game_state():
     """Returns the singleton GameState object, ensuring all users share the same state."""
     return GameState()
+
+
+# --- Sound Effects ---
+def play_sound(sound_type):
+    """Embeds HTML to play a sound effect using JavaScript and Tone.js."""
+    if sound_type == 'success':
+        js = """
+        <script>
+            const synth = new Tone.Synth().toDestination();
+            synth.triggerAttackRelease("C5", "8n");
+        </script>
+        """
+    elif sound_type == 'error':
+        js = """
+        <script>
+            const synth = new Tone.Synth().toDestination();
+            synth.triggerAttackRelease("C3", "8n");
+        </script>
+        """
+    st.components.v1.html(js, height=0)
 
 
 # --- Quiz Questions ---
@@ -193,6 +217,9 @@ def apply_event_adjustment(prices, event_type):
             if sym in adjusted_prices: adjusted_prices[sym] *= 0.95
         for sym in ['INFY.NS', 'TCS.NS']:
             if sym in adjusted_prices: adjusted_prices[sym] *= 1.10
+    elif event_type == "Volatility Spike":
+         # This event is now handled by the volatility_multiplier in the main tick
+        pass
     return adjusted_prices
 
 def format_indian_currency(n):
@@ -319,6 +346,9 @@ def render_main_interface(prices):
     game_state = get_game_state()
     st.title(f"📈 {GAME_NAME}")
     
+    # Inject Tone.js script
+    st.components.v1.html('<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>', height=0)
+
     if game_state.game_status == "Running":
         remaining_time = max(0, game_state.round_duration_seconds - int(time.time() - game_state.game_start_time))
         if remaining_time == 0: game_state.game_status = "Finished"
@@ -403,9 +433,18 @@ def render_trade_interface(player_name, player, prices, disabled_status):
         st.info(f"Bid: {format_indian_currency(bid_price)} | Ask: {format_indian_currency(ask_price)}")
         
         b1, b2, b3 = st.columns(3)
-        if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"): execute_trade(player_name, player, "Buy", symbol_choice, qty, prices); st.rerun()
-        if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status): execute_trade(player_name, player, "Sell", symbol_choice, qty, prices); st.rerun()
-        if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status): execute_trade(player_name, player, "Short", symbol_choice, qty, prices); st.rerun()
+        if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled_status, type="primary"): 
+            if execute_trade(player_name, player, "Buy", symbol_choice, qty, prices): play_sound('success')
+            else: play_sound('error')
+            st.rerun()
+        if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled_status): 
+            if execute_trade(player_name, player, "Sell", symbol_choice, qty, prices): play_sound('success')
+            else: play_sound('error')
+            st.rerun()
+        if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled_status): 
+            if execute_trade(player_name, player, "Short", symbol_choice, qty, prices): play_sound('success')
+            else: play_sound('error')
+            st.rerun()
             
     st.markdown("---"); render_current_holdings(player, prices)
 
@@ -486,7 +525,6 @@ def render_optimizer(holdings):
         else: st.error(performance)
 
 def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False):
-    game_state = get_game_state()
     mid_price = prices.get(symbol, 0)
     if mid_price == 0: return False
 
@@ -512,7 +550,7 @@ def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=Fals
         if trade_executed and player['holdings'][symbol] == 0: del player['holdings'][symbol]
     
     if trade_executed: 
-        game_state.market_sentiment[symbol] = game_state.market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
+        get_game_state().market_sentiment[symbol] = get_game_state().market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
         log_transaction(player_name, action, symbol, qty, trade_price, cost, is_algo)
     elif not is_algo: 
         st.error("Trade failed: Insufficient capital or holdings.")
@@ -583,18 +621,39 @@ def run_game_tick(prices):
     for symbol in game_state.market_sentiment:
         game_state.market_sentiment[symbol] *= 0.95 
 
-    if not game_state.event_active and random.random() < 0.02: # Increased frequency
-        news_item = random.choice(PRE_BUILT_NEWS)
+    elapsed_time = time.time() - game_state.game_start_time
+    # Powell Morning Speech
+    if not game_state.powell_morning_triggered and elapsed_time > 120: # 2 minutes in
+        news_item = next((news for news in PRE_BUILT_NEWS if "Good Morning" in news["headline"]), None)
+        if news_item:
+            game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
+            game_state.event_type = news_item['impact']; game_state.event_active = True
+            game_state.event_end = time.time() + 60
+            game_state.powell_morning_triggered = True
+
+    # Powell Afternoon Speech
+    if not game_state.powell_afternoon_triggered and elapsed_time > (game_state.round_duration_seconds - 120): # 2 minutes before end
+        news_item = next((news for news in PRE_BUILT_NEWS if "Good Afternoon" in news["headline"]), None)
+        if news_item:
+            game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
+            game_state.event_type = news_item['impact']; game_state.event_active = True
+            game_state.event_end = time.time() + 60
+            game_state.powell_afternoon_triggered = True
+
+    if not game_state.event_active and random.random() < 0.02: 
+        news_item = random.choice([n for n in PRE_BUILT_NEWS if "Powell" not in n['headline']])
         game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {news_item['headline']}")
         if len(game_state.news_feed) > 5: game_state.news_feed.pop()
-        game_state.event_type = news_item['impact']
-        game_state.event_active = True
-        game_state.event_end = time.time() + random.randint(30, 60)
-        st.toast(f"⚡ Market Event: {game_state.event_type}!", icon="🎉")
+        game_state.event_type = news_item['impact']; game_state.event_active = True
+        game_state.event_end = time.time() + random.randint(30, 60); st.toast(f"⚡ Market Event: {game_state.event_type}!", icon="🎉")
         
     if game_state.event_active and time.time() >= game_state.event_end:
         game_state.event_active = False; st.info("Market event has ended.")
-    if game_state.event_active: prices = apply_event_adjustment(prices, game_state.event_type)
+    if game_state.event_active: 
+        if game_state.event_type == 'Volatility Spike':
+            prices = {k: v * (1 + random.uniform(-0.01, 0.01) * 2) for k, v in prices.items()}
+        else:
+            prices = apply_event_adjustment(prices, game_state.event_type)
     
     handle_futures_expiry(prices)
     run_algo_strategies(prices)
@@ -687,3 +746,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
