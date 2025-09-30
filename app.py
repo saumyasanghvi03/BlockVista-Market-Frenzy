@@ -362,22 +362,27 @@ def render_main_interface(prices):
     with col2: render_global_views(prices)
 
 def render_global_views(prices):
-    game_state = get_game_state()
-    
-    render_market_sentiment_meter()
-    
-    st.subheader("📰 Live News Feed")
-    news_feed = getattr(game_state, 'news_feed', [])
-    if news_feed:
-        for news in news_feed:
-            st.info(news)
-    else:
-        st.info("No market news at the moment.")
+    with st.container(border=True):
+        st.subheader("Global Market View")
+        render_market_sentiment_meter()
+        
+        st.markdown("---")
+        st.subheader("📰 Live News Feed")
+        game_state = get_game_state()
+        news_feed = getattr(game_state, 'news_feed', [])
+        if news_feed:
+            for news in news_feed:
+                st.info(news)
+        else:
+            st.info("No market news at the moment.")
 
-    st.subheader("Live Player Standings")
-    render_leaderboard(prices)
-    st.subheader("Live Market Feed")
-    render_live_market_table(prices)
+        st.markdown("---")
+        st.subheader("Live Player Standings")
+        render_leaderboard(prices)
+        
+        st.markdown("---")
+        st.subheader("Live Market Feed")
+        render_live_market_table(prices)
 
 def render_market_sentiment_meter():
     game_state = get_game_state()
@@ -399,48 +404,49 @@ def render_market_sentiment_meter():
 
 def render_trade_execution_panel(prices):
     game_state = get_game_state()
-    st.subheader("Trade Execution Panel")
-    player_list = list(game_state.players.keys())
-    if not player_list: st.warning("No players have joined the game yet."); return
-    acting_player = st.selectbox("Select Your Player to Trade", player_list)
     
-    if acting_player and acting_player in game_state.players:
-        player = game_state.players[acting_player]
-        st.markdown(f"**{acting_player}'s Terminal (Mode: {player['mode']})**")
+    with st.container(border=True):
+        st.subheader("Trade Execution Panel")
+        player_list = list(game_state.players.keys())
+        if not player_list: st.warning("No players have joined the game yet."); return
+        acting_player = st.selectbox("Select Your Player to Trade", player_list)
         
-        holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
-        total_value = player['capital'] + holdings_value
-        pnl = total_value - (INITIAL_CAPITAL * 5 if player['mode'] == 'HNI' else INITIAL_CAPITAL)
-        player['pnl'] = pnl
-        pnl_arrow = "🔼" if pnl >= 0 else "🔽"
+        if acting_player and acting_player in game_state.players:
+            player = game_state.players[acting_player]
+            st.markdown(f"**{acting_player}'s Terminal (Mode: {player['mode']})**")
+            
+            holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
+            total_value = player['capital'] + holdings_value
+            pnl = total_value - (INITIAL_CAPITAL * 5 if player['mode'] == 'HNI' else INITIAL_CAPITAL)
+            player['pnl'] = pnl
+            pnl_arrow = "🔼" if pnl >= 0 else "🔽"
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Cash", format_indian_currency(player['capital']))
-        c2.metric("Portfolio Value", format_indian_currency(total_value))
-        c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Cash", format_indian_currency(player['capital']))
+            c2.metric("Portfolio Value", format_indian_currency(total_value))
+            c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow}")
 
-        tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Transaction History", "📊 Strategy & Insights"]
-        tab1, tab2, tab3, tab4 = st.tabs(tabs)
-        is_game_running = game_state.game_status == "Running"
+            tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Transaction History", "📊 Strategy & Insights"]
+            tab1, tab2, tab3, tab4 = st.tabs(tabs)
+            is_game_running = game_state.game_status == "Running"
 
-        with tab1: render_trade_interface(acting_player, player, prices, is_game_running)
-        with tab2: render_algo_trading_tab(acting_player, player, is_game_running)
-        with tab3: render_transaction_history(acting_player)
-        with tab4: render_strategy_tab(player)
+            with tab1: render_trade_interface(acting_player, player, prices, is_game_running)
+            with tab2: render_algo_trading_tab(acting_player, player, is_game_running)
+            with tab3: render_transaction_history(acting_player)
+            with tab4: render_strategy_tab(player)
 
 def render_trade_interface(player_name, player, prices, disabled_status):
-    with st.container(border=True):
-        order_type_tabs = ["Market", "Limit", "Stop-Loss"]
-        market_tab, limit_tab, stop_loss_tab = st.tabs(order_type_tabs)
+    order_type_tabs = ["Market", "Limit", "Stop-Loss"]
+    market_tab, limit_tab, stop_loss_tab = st.tabs(order_type_tabs)
 
-        with market_tab:
-            render_market_order_ui(player_name, player, prices, disabled_status)
+    with market_tab:
+        render_market_order_ui(player_name, player, prices, disabled_status)
 
-        with limit_tab:
-            render_limit_order_ui(player_name, player, prices, disabled_status)
-        
-        with stop_loss_tab:
-            render_stop_loss_order_ui(player_name, player, prices, disabled_status)
+    with limit_tab:
+        render_limit_order_ui(player_name, player, prices, disabled_status)
+    
+    with stop_loss_tab:
+        render_stop_loss_order_ui(player_name, player, prices, disabled_status)
 
     st.markdown("---")
     render_current_holdings(player, prices)
