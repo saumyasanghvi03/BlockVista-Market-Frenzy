@@ -418,10 +418,14 @@ def render_market_sentiment_meter():
     normalized_sentiment = np.clip((overall_sentiment + 5) * 10, 0, 100)
     
     st.markdown("##### Market Sentiment")
-    st.progress(int(normalized_sentiment))
-    c1, c2 = st.columns(2)
-    c1.write("<p style='color:red;'>Extreme Fear</p>", unsafe_allow_html=True)
-    c2.write("<p style='text-align: right; color:green;'>Extreme Greed</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        st.write("<p style='text-align: right; margin-top: -5px;'>Fear</p>", unsafe_allow_html=True)
+    with col2:
+        st.progress(int(normalized_sentiment))
+    with col3:
+        st.write("<p style='margin-top: -5px;'>Greed</p>", unsafe_allow_html=True)
 
 
 def render_trade_execution_panel(prices):
