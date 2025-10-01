@@ -92,6 +92,8 @@ class GameState:
         self.auto_square_off_complete = False
         self.block_deal_offer = None
         self.closing_warning_triggered = False
+        self.difficulty_level = 1
+        self.current_margin_requirement = MARGIN_REQUIREMENT
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices."""
@@ -406,6 +408,9 @@ def render_sidebar():
 
         game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, getattr(game_state, 'volatility_multiplier', 1.0), 0.5)
         
+        game_state.difficulty_level = st.sidebar.selectbox("Game Difficulty", [1, 2, 3], index=game_state.difficulty_level - 1, format_func=lambda x: f"Level {x}", disabled=(game_state.game_status == "Running"))
+
+
         st.sidebar.markdown("---")
         st.sidebar.subheader("Broadcast News")
         
@@ -481,7 +486,7 @@ def render_main_interface(prices):
         if remaining_time <= 30 and not getattr(game_state, 'closing_warning_triggered', False):
             play_sound('closing_warning')
             game_state.closing_warning_triggered = True
-        st.markdown(f"**Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}**")
+        st.markdown(f"**Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}** | **Difficulty: Level {game_state.difficulty_level}**")
     elif game_state.game_status == "Stopped": st.info("Game is paused. Press 'Start Game' to begin.")
     elif game_state.game_status == "Finished": st.success("Game has finished! See the final leaderboard below.")
 
