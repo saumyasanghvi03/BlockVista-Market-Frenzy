@@ -641,8 +641,8 @@ def render_market_order_ui(player_name, player, prices, disabled):
         qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"market_qty_{player_name}", disabled=disabled)
     
     mid_price = prices.get(symbol_choice, 0)
-    ask_price = mid_price * (1 + BID_ASK_SPREAD / 2)
-    bid_price = mid_price * (1 - BID_ASK_SPREAD / 2)
+    ask_price = mid_price * (1 + get_game_state().bid_ask_spread / 2)
+    bid_price = mid_price * (1 - get_game_state().bid_ask_spread / 2)
     st.info(f"Bid: {format_indian_currency(bid_price)} | Ask: {format_indian_currency(ask_price)}")
 
     b1, b2, b3 = st.columns(3)
@@ -764,13 +764,14 @@ def render_optimizer(holdings):
         else: st.error(performance)
 
 def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False, order_type="Market"):
+    game_state = get_game_state()
     mid_price = prices.get(symbol, 0)
     if mid_price == 0: return False
 
     if action == "Buy":
-        trade_price = mid_price * (1 + BID_ASK_SPREAD / 2)
+        trade_price = mid_price * (1 + game_state.bid_ask_spread / 2)
     else: # Sell or Short
-        trade_price = mid_price * (1 - BID_ASK_SPREAD / 2)
+        trade_price = mid_price * (1 - game_state.bid_ask_spread / 2)
     
     trade_price *= calculate_slippage(player, symbol, qty, action)
     cost = trade_price * qty
@@ -778,7 +779,7 @@ def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=Fals
     trade_executed = False
     if action == "Buy" and player['capital'] >= cost:
         player['capital'] -= cost; player['holdings'][symbol] = player['holdings'].get(symbol, 0) + qty; trade_executed = True
-    elif action == "Short" and player['capital'] >= cost * MARGIN_REQUIREMENT:
+    elif action == "Short" and player['capital'] >= cost * game_state.current_margin_requirement:
         player['capital'] += cost; player['holdings'][symbol] = player['holdings'].get(symbol, 0) - qty; trade_executed = True
     elif action == "Sell":
         current_qty = player['holdings'].get(symbol, 0)
