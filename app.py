@@ -96,10 +96,12 @@ class GameState:
         self.current_margin_requirement = MARGIN_REQUIREMENT
 
     def reset(self):
-        """Resets the game to its initial state, but keeps the daily base prices."""
+        """Resets the game to its initial state, but keeps the daily base prices and difficulty."""
         base_prices = self.base_real_prices
+        difficulty = self.difficulty_level
         self.__init__()
         self.base_real_prices = base_prices
+        self.difficulty_level = difficulty
 
 
 @st.cache_resource
