@@ -408,7 +408,8 @@ def render_sidebar():
 
         game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, getattr(game_state, 'volatility_multiplier', 1.0), 0.5)
         
-        game_state.difficulty_level = st.sidebar.selectbox("Game Difficulty", [1, 2, 3], index=game_state.difficulty_level - 1, format_func=lambda x: f"Level {x}", disabled=(game_state.game_status == "Running"))
+        difficulty_index = getattr(game_state, 'difficulty_level', 1) - 1
+        game_state.difficulty_level = st.sidebar.selectbox("Game Difficulty", [1, 2, 3], index=difficulty_index, format_func=lambda x: f"Level {x}", disabled=(game_state.game_status == "Running"))
 
 
         st.sidebar.markdown("---")
@@ -486,7 +487,7 @@ def render_main_interface(prices):
         if remaining_time <= 30 and not getattr(game_state, 'closing_warning_triggered', False):
             play_sound('closing_warning')
             game_state.closing_warning_triggered = True
-        st.markdown(f"**Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}** | **Difficulty: Level {game_state.difficulty_level}**")
+        st.markdown(f"**Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}** | **Difficulty: Level {getattr(game_state, 'difficulty_level', 1)}**")
     elif game_state.game_status == "Stopped": st.info("Game is paused. Press 'Start Game' to begin.")
     elif game_state.game_status == "Finished": st.success("Game has finished! See the final leaderboard below.")
 
