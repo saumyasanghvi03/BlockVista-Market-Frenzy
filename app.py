@@ -322,7 +322,7 @@ def render_sidebar():
         player_name = st.sidebar.text_input("Enter Name", key="name_input")
         mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
         
-        if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
+        if st.sidebar.button("Join Game"):
             if player_name and player_name.strip() and player_name not in game_state.players:
                 starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
                 game_state.players[player_name] = {
@@ -983,6 +983,9 @@ def main():
     
     if game_state.game_status == "Running": 
         time.sleep(1)
+        st.rerun()
+    elif game_state.game_status == "Stopped":
+        time.sleep(5)
         st.rerun()
 
 if __name__ == "__main__":
