@@ -327,7 +327,6 @@ def calculate_indicator(indicator, symbol):
 def render_sidebar():
     game_state = get_game_state()
     
-    # Player Login/Logout
     if 'player' not in st.query_params:
         st.sidebar.title("📝 Game Entry")
         player_name = st.sidebar.text_input("Enter Name", key="name_input")
