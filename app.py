@@ -37,6 +37,9 @@ MARGIN_REQUIREMENT = 0.2
 ADMIN_PASSWORD = "100370" # Set your admin password here
 BID_ASK_SPREAD = 0.001 # 0.1% spread
 SHORT_SQUEEZE_THRESHOLD = 3 # Number of players shorting to trigger potential squeeze
+HFT_REBATE_WINDOW = 60 # seconds
+HFT_REBATE_TRADES = 5 # trades
+HFT_REBATE_AMOUNT = 5000 # cash bonus
 
 # --- Pre-built News Headlines ---
 PRE_BUILT_NEWS = [
@@ -61,6 +64,7 @@ PRE_BUILT_NEWS = [
     {"headline": "Regulatory probe launched into {symbol} over accounting irregularities.", "impact": "Symbol Crash"},
     {"headline": "{symbol} announces a surprise stock split, shares to adjust at market open.", "impact": "Stock Split"},
     {"headline": "{symbol} declares a special dividend for all shareholders.", "impact": "Dividend"},
+    {"headline": "High short interest in {symbol} triggers a potential short squeeze!", "impact": "Short Squeeze"},
 ]
 
 # --- Game State Management (Singleton for Live Sync) ---
@@ -86,6 +90,7 @@ class GameState:
         self.volatility_multiplier = 1.0
         self.news_feed = []
         self.auto_square_off_complete = False
+        self.block_deal_offer = None
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices."""
@@ -236,6 +241,7 @@ def calculate_slippage(player, symbol, qty, action):
 
 def apply_event_adjustment(prices, event_type, target_symbol=None):
     adjusted_prices = prices.copy()
+    game_state = get_game_state()
     if event_type == "Flash Crash":
         adjusted_prices = {k: v * random.uniform(0.95, 0.98) for k, v in adjusted_prices.items()}
     elif event_type == "Bull Rally":
@@ -257,6 +263,18 @@ def apply_event_adjustment(prices, event_type, target_symbol=None):
     elif event_type == "Volatility Spike":
          # This event is now handled by the volatility_multiplier in the main tick
         pass
+    elif event_type == "Stock Split" and target_symbol:
+        adjusted_prices[target_symbol] /= 2
+        for player in game_state.players.values():
+            if target_symbol in player['holdings']:
+                player['holdings'][target_symbol] *= 2
+    elif event_type == "Dividend" and target_symbol:
+        dividend_per_share = adjusted_prices[target_symbol] * 0.01 # 1% dividend
+        for player in game_state.players.values():
+            if target_symbol in player['holdings'] and player['holdings'][target_symbol] > 0:
+                dividend_received = dividend_per_share * player['holdings'][target_symbol]
+                player['capital'] += dividend_received
+                log_transaction(player['name'], "Dividend", target_symbol, player['holdings'][target_symbol], dividend_per_share, dividend_received)
     return adjusted_prices
 
 def format_indian_currency(n):
@@ -298,33 +316,25 @@ def calculate_indicator(indicator, symbol):
 # --- UI Functions ---
 def render_sidebar():
     game_state = get_game_state()
-
-    if 'player_name' not in st.session_state:
-        st.sidebar.title("📝 Game Entry")
-        player_name = st.sidebar.text_input("Enter Name", key="name_input")
-        mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
-        
-        if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
-            if player_name and player_name.strip() and player_name not in game_state.players:
-                starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
-                game_state.players[player_name] = {
-                    "name": player_name, "mode": mode, "capital": starting_capital, 
-                    "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, 
-                    "pending_orders": [], "algo": "Off", "custom_algos": {},
-                    "slippage_multiplier": 0.5 if mode == "HFT" else 1.0,
-                    "value_history": []
-                }
-                game_state.transactions[player_name] = []
-                st.session_state.player_name = player_name
-                st.sidebar.success(f"{player_name} joined as {mode}!")
-                st.rerun()
-            else: st.sidebar.error("Name is invalid or already taken!")
-    else:
-        st.sidebar.success(f"Logged in as {st.session_state.player_name}")
-        if st.sidebar.button("Logout"):
-            del st.session_state.player_name
+    st.sidebar.title("📝 Game Entry")
+    player_name = st.sidebar.text_input("Enter Name", key="name_input")
+    mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
+    
+    if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
+        if player_name and player_name.strip() and player_name not in game_state.players:
+            starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
+            game_state.players[player_name] = {
+                "name": player_name, "mode": mode, "capital": starting_capital, 
+                "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, 
+                "pending_orders": [], "algo": "Off", "custom_algos": {},
+                "slippage_multiplier": 0.5 if mode == "HFT" else 1.0,
+                "value_history": [], "trade_timestamps": []
+            }
+            game_state.transactions[player_name] = []
+            st.sidebar.success(f"{player_name} joined as {mode}!")
             st.rerun()
-
+        else: st.sidebar.error("Name is invalid or already taken!")
+    
     st.sidebar.title("🔐 Admin Login")
     password = st.sidebar.text_input("Enter Password", type="password")
 
@@ -364,6 +374,7 @@ def render_sidebar():
                     game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {headline}")
                     if len(game_state.news_feed) > 5: game_state.news_feed.pop()
                     game_state.event_type = selected_news['impact']
+                    game_state.event_target_symbol = target_symbol
                     game_state.event_active = True
                     game_state.event_end = time.time() + 60
                     st.toast(f"News Published!", icon="📰"); announce_news(headline)
@@ -968,3 +979,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
