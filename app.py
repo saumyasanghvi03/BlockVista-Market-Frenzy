@@ -445,7 +445,7 @@ def render_main_interface(prices):
     elif game_state.game_status == "Finished": st.success("Game has finished! See the final leaderboard below.")
 
     if st.session_state.get('role') == 'admin':
-        render_global_views(prices)
+        render_global_views(prices, is_admin=True)
     elif 'player' in st.query_params:
         col1, col2 = st.columns([1, 1]); 
         with col1: render_trade_execution_panel(prices)
@@ -455,7 +455,7 @@ def render_main_interface(prices):
         render_global_views(prices)
 
 
-def render_global_views(prices):
+def render_global_views(prices, is_admin=False):
     with st.container(border=True):
         st.subheader("Global Market View")
         render_market_sentiment_meter()
@@ -474,6 +474,11 @@ def render_global_views(prices):
         st.subheader("Live Player Standings")
         render_leaderboard(prices)
         
+        if is_admin:
+            st.markdown("---")
+            st.subheader("Live Player Performance")
+            render_admin_performance_chart()
+
         st.markdown("---")
         st.subheader("Live Market Feed")
         render_live_market_table(prices)
@@ -498,6 +503,23 @@ def render_market_sentiment_meter():
         st.progress(int(normalized_sentiment))
     with col3:
         st.write("<p style='margin-top: -5px;'>Greed</p>", unsafe_allow_html=True)
+
+def render_admin_performance_chart():
+    game_state = get_game_state()
+    if not game_state.players:
+        st.info("No players have joined yet.")
+        return
+        
+    chart_data = {}
+    for name, player_data in game_state.players.items():
+        if player_data.get('value_history'):
+            chart_data[name] = player_data['value_history']
+            
+    if chart_data:
+        df = pd.DataFrame(chart_data)
+        st.line_chart(df)
+    else:
+        st.info("No trading activity yet to display.")
 
 
 def render_trade_execution_panel(prices):
