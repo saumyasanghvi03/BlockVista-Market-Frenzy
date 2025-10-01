@@ -993,27 +993,33 @@ def run_algo_strategies(prices):
     for name, player in game_state.players.items():
         active_algo = player.get('algo', 'Off')
         if active_algo == 'Off': continue
-        trade_symbol = random.choice(NIFTY50_SYMBOLS + CRYPTO_SYMBOLS)
-        if active_algo in player.get('custom_algos', {}):
-            strategy = player['custom_algos'][active_algo]
-            indicator_val = calculate_indicator(strategy['indicator'], trade_symbol)
-            if indicator_val is None: continue
-            condition_met = (strategy['condition'] == 'Greater Than' and indicator_val > strategy['threshold']) or \
-                            (strategy['condition'] == 'Less Than' and indicator_val < strategy['threshold'])
-            if condition_met: execute_trade(name, player, strategy['action'], trade_symbol, 1, prices, is_algo=True)
-        else: # Default Algos
-            price_change = prices.get(trade_symbol, 0) - prev_prices.get(trade_symbol, prices.get(trade_symbol, 0))
-            if prices.get(trade_symbol, 0) == 0: continue
+        
+        # Scan multiple symbols for faster execution
+        for _ in range(3):
+            trade_symbol = random.choice(NIFTY50_SYMBOLS + CRYPTO_SYMBOLS)
+            if active_algo in player.get('custom_algos', {}):
+                strategy = player['custom_algos'][active_algo]
+                indicator_val = calculate_indicator(strategy['indicator'], trade_symbol)
+                if indicator_val is None: continue
+                condition_met = (strategy['condition'] == 'Greater Than' and indicator_val > strategy['threshold']) or \
+                                (strategy['condition'] == 'Less Than' and indicator_val < strategy['threshold'])
+                if condition_met: 
+                    execute_trade(name, player, strategy['action'], trade_symbol, 1, prices, is_algo=True)
+                    break # Execute one trade per tick
+            else: # Default Algos
+                price_change = prices.get(trade_symbol, 0) - prev_prices.get(trade_symbol, prices.get(trade_symbol, 0))
+                if prices.get(trade_symbol, 0) == 0: continue
 
-            if active_algo == "Momentum Trader" and abs(price_change / prices[trade_symbol]) > 0.001:
-                execute_trade(name, player, "Buy" if price_change > 0 else "Sell", trade_symbol, 1, prices, is_algo=True)
-            elif active_algo == "Mean Reversion" and abs(price_change / prices[trade_symbol]) > 0.001:
-                execute_trade(name, player, "Sell" if price_change > 0 else "Buy", trade_symbol, 1, prices, is_algo=True)
-            elif active_algo == "Volatility Breakout" and abs(price_change / prices[trade_symbol]) * 100 > 0.1:
-                execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
-            elif active_algo == "Value Investor":
-                change_30_day = calculate_indicator("Price Change % (30-day)", trade_symbol)
-                if change_30_day is not None and change_30_day < -10: execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True)
+                if active_algo == "Momentum Trader" and abs(price_change / prices[trade_symbol]) > 0.001:
+                    if execute_trade(name, player, "Buy" if price_change > 0 else "Sell", trade_symbol, 1, prices, is_algo=True): break
+                elif active_algo == "Mean Reversion" and abs(price_change / prices[trade_symbol]) > 0.001:
+                    if execute_trade(name, player, "Sell" if price_change > 0 else "Buy", trade_symbol, 1, prices, is_algo=True): break
+                elif active_algo == "Volatility Breakout" and abs(price_change / prices[trade_symbol]) * 100 > 0.1:
+                    if execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True): break
+                elif active_algo == "Value Investor":
+                    change_30_day = calculate_indicator("Price Change % (30-day)", trade_symbol)
+                    if change_30_day is not None and change_30_day < -10:
+                        if execute_trade(name, player, "Buy", trade_symbol, 1, prices, is_algo=True): break
 
 def main():
     game_state = get_game_state()
