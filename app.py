@@ -91,8 +91,7 @@ class GameState:
         self.news_feed = []
         self.auto_square_off_complete = False
         self.block_deal_offer = None
-        self.difficulty_level = 1
-        self.current_margin_requirement = MARGIN_REQUIREMENT
+        self.closing_warning_triggered = False
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices."""
@@ -110,6 +109,7 @@ def get_game_state():
 # --- Sound Effects ---
 def play_sound(sound_type):
     """Embeds HTML to play a sound effect using JavaScript and Tone.js."""
+    js = ""
     if sound_type == 'success':
         js = """
         <script>
@@ -128,7 +128,40 @@ def play_sound(sound_type):
             }
         </script>
         """
+    elif sound_type == 'opening_bell':
+        js = """
+        <script>
+            if (typeof Tone !== 'undefined') {
+                const synth = new Tone.Synth().toDestination();
+                const now = Tone.now();
+                synth.triggerAttackRelease("C4", "8n", now);
+                synth.triggerAttackRelease("E4", "8n", now + 0.2);
+                synth.triggerAttackRelease("G4", "8n", now + 0.4);
+            }
+        </script>
+        """
+    elif sound_type == 'closing_warning':
+        js = """
+        <script>
+            if (typeof Tone !== 'undefined') {
+                const synth = new Tone.Synth().toDestination();
+                const now = Tone.now();
+                synth.triggerAttackRelease("G5", "16n", now);
+                synth.triggerAttackRelease("G5", "16n", now + 0.3);
+            }
+        </script>
+        """
+    elif sound_type == 'final_bell':
+        js = """
+        <script>
+            if (typeof Tone !== 'undefined') {
+                const synth = new Tone.Synth().toDestination();
+                synth.triggerAttackRelease("C4", "2n");
+            }
+        </script>
+        """
     st.components.v1.html(js, height=0)
+
 
 def announce_news(headline):
     """Embeds HTML to play a TTS announcement of the news headline."""
@@ -441,7 +474,13 @@ def render_main_interface(prices):
 
     if game_state.game_status == "Running":
         remaining_time = max(0, game_state.round_duration_seconds - int(time.time() - game_state.game_start_time))
-        if remaining_time == 0: game_state.game_status = "Finished"
+        if remaining_time == 0: 
+            if game_state.game_status != "Finished": play_sound('final_bell')
+            game_state.game_status = "Finished"
+        
+        if remaining_time <= 30 and not getattr(game_state, 'closing_warning_triggered', False):
+            play_sound('closing_warning')
+            game_state.closing_warning_triggered = True
         st.markdown(f"**Time Remaining: {remaining_time // 60:02d}:{remaining_time % 60:02d}**")
     elif game_state.game_status == "Stopped": st.info("Game is paused. Press 'Start Game' to begin.")
     elif game_state.game_status == "Finished": st.success("Game has finished! See the final leaderboard below.")
