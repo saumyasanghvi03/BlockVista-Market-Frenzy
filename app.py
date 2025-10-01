@@ -823,7 +823,7 @@ def render_leaderboard(prices):
                 game_state.auto_square_off_complete = True
                 st.rerun() # Rerun to update the leaderboard with final values
 
-            st.balloons(); winner = lb_df.iloc[0]
+            st.snow(); winner = lb_df.iloc[0]
             st.success(f"🎉 The winner is {winner['Player']}! 🎉")
             c1, c2 = st.columns(2)
             c1.metric("🏆 Final Portfolio Value", format_indian_currency(winner['Portfolio Value']))
