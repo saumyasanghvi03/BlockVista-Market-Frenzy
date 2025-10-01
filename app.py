@@ -36,7 +36,7 @@ BASE_SLIPPAGE_RATE = 0.005
 MARGIN_REQUIREMENT = 0.2
 ADMIN_PASSWORD = "100370" # Set your admin password here
 BID_ASK_SPREAD = 0.001 # 0.1% spread
-SHORT_SQUEEZE_THRESHOLD = 5 # Number of players shorting to trigger potential squeeze
+SHORT_SQUEEZE_THRESHOLD = 3 # Number of players shorting to trigger potential squeeze
 
 # --- Pre-built News Headlines ---
 PRE_BUILT_NEWS = [
@@ -59,8 +59,8 @@ PRE_BUILT_NEWS = [
     # Symbol Specific
     {"headline": "{symbol} secures a massive government contract, sending its stock soaring!", "impact": "Symbol Bull Run"},
     {"headline": "Regulatory probe launched into {symbol} over accounting irregularities.", "impact": "Symbol Crash"},
-    {"headline": "Government unexpectedly announces a ban on all private cryptocurrencies.", "impact": "Flash Crash"},
-    {"headline": "New regulations announced for the tech sector; investors react cautiously.", "impact": "Sector Rotation"},
+    {"headline": "{symbol} announces a surprise stock split, shares to adjust at market open.", "impact": "Stock Split"},
+    {"headline": "{symbol} declares a special dividend for all shareholders.", "impact": "Dividend"},
 ]
 
 # --- Game State Management (Singleton for Live Sync) ---
@@ -957,3 +957,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
