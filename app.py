@@ -316,25 +316,33 @@ def calculate_indicator(indicator, symbol):
 # --- UI Functions ---
 def render_sidebar():
     game_state = get_game_state()
-    st.sidebar.title("📝 Game Entry")
-    player_name = st.sidebar.text_input("Enter Name", key="name_input")
-    mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
     
-    if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
-        if player_name and player_name.strip() and player_name not in game_state.players:
-            starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
-            game_state.players[player_name] = {
-                "name": player_name, "mode": mode, "capital": starting_capital, 
-                "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, 
-                "pending_orders": [], "algo": "Off", "custom_algos": {},
-                "slippage_multiplier": 0.5 if mode == "HFT" else 1.0,
-                "value_history": [], "trade_timestamps": []
-            }
-            game_state.transactions[player_name] = []
-            st.sidebar.success(f"{player_name} joined as {mode}!")
+    if 'player_name' not in st.session_state:
+        st.sidebar.title("📝 Game Entry")
+        player_name = st.sidebar.text_input("Enter Name", key="name_input")
+        mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
+        
+        if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
+            if player_name and player_name.strip() and player_name not in game_state.players:
+                starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
+                game_state.players[player_name] = {
+                    "name": player_name, "mode": mode, "capital": starting_capital, 
+                    "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, 
+                    "pending_orders": [], "algo": "Off", "custom_algos": {},
+                    "slippage_multiplier": 0.5 if mode == "HFT" else 1.0,
+                    "value_history": [], "trade_timestamps": []
+                }
+                game_state.transactions[player_name] = []
+                st.session_state.player_name = player_name
+                st.sidebar.success(f"{player_name} joined as {mode}!")
+                st.rerun()
+            else: st.sidebar.error("Name is invalid or already taken!")
+    else:
+        st.sidebar.success(f"Logged in as {st.session_state.player_name}")
+        if st.sidebar.button("Logout"):
+            del st.session_state.player_name
             st.rerun()
-        else: st.sidebar.error("Name is invalid or already taken!")
-    
+
     st.sidebar.title("🔐 Admin Login")
     password = st.sidebar.text_input("Enter Password", type="password")
 
