@@ -298,26 +298,35 @@ def optimize_portfolio(player_holdings):
     except Exception as e: return None, f"Optimization failed: {e}"
 
 def calculate_indicator(indicator, symbol):
-    hist = get_historical_data([symbol], period="2mo")
+    hist = get_historical_data([symbol], period="2mo") 
     if hist.empty or len(hist) < 30: return None
+    
+    # Robustly select the first column, regardless of its name
+    price_series = hist.iloc[:, 0]
+
     if indicator == "Price Change % (5-day)":
         if len(hist) < 6: return None
-        return ((hist[symbol].iloc[-1] - hist[symbol].iloc[-6]) / hist[symbol].iloc[-6]) * 100
+        price_now = price_series.iloc[-1]
+        price_then = price_series.iloc[-6]
+        return ((price_now - price_then) / price_then) * 100
+    
     elif indicator == "SMA Crossover (10/20)":
         if len(hist) < 20: return None
-        sma_10 = hist[symbol].rolling(window=10).mean().iloc[-1]
-        sma_20 = hist[symbol].rolling(window=20).mean().iloc[-1]
+        sma_10 = price_series.rolling(window=10).mean().iloc[-1]
+        sma_20 = price_series.rolling(window=20).mean().iloc[-1]
         return sma_10 - sma_20
+        
     elif indicator == "Price Change % (30-day)":
         if len(hist) < 31: return None
-        return ((hist[symbol].iloc[-1] - hist[symbol].iloc[-31]) / hist[symbol].iloc[-31]) * 100
+        price_now = price_series.iloc[-1]
+        price_then = price_series.iloc[-31]
+        return ((price_now - price_then) / price_then) * 100
     return None
 
 # --- UI Functions ---
 def render_sidebar():
     game_state = get_game_state()
     
-    # Player Login/Logout
     if 'player' not in st.query_params:
         st.sidebar.title("📝 Game Entry")
         player_name = st.sidebar.text_input("Enter Name", key="name_input")
@@ -343,7 +352,6 @@ def render_sidebar():
             st.query_params.clear()
             st.rerun()
 
-    # Admin Login
     st.sidebar.title("🔐 Admin Login")
     password = st.sidebar.text_input("Enter Password", type="password")
 
