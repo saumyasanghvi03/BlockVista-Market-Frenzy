@@ -33,6 +33,7 @@ ALL_SYMBOLS = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL] + OPTION_SYMBOLS 
 # Game Mechanics Settings
 ADMIN_PASSWORD = "100370" # Set your admin password here
 
+
 # --- Pre-built News Headlines ---
 PRE_BUILT_NEWS = [
     # India Specific
