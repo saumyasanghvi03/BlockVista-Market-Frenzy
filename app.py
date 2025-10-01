@@ -950,7 +950,7 @@ def check_margin_calls_and_orders(prices):
         # Margin Call Logic
         holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
         total_value = player['capital'] + holdings_value
-        margin_needed = abs(holdings_value) * MARGIN_REQUIREMENT
+        margin_needed = abs(holdings_value) * game_state.current_margin_requirement
 
         if total_value < margin_needed and player['holdings']:
             player['margin_calls'] += 1
