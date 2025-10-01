@@ -413,6 +413,8 @@ def render_sidebar():
         difficulty_index = getattr(game_state, 'difficulty_level', 1) - 1
         game_state.difficulty_level = st.sidebar.selectbox("Game Difficulty", [1, 2, 3], index=difficulty_index, format_func=lambda x: f"Level {x}", disabled=(game_state.game_status == "Running"))
 
+        game_state.current_margin_requirement = st.sidebar.slider("Margin Requirement (%)", 10, 50, int(getattr(game_state, 'current_margin_requirement', 0.2) * 100), 5) / 100.0
+
 
         st.sidebar.markdown("---")
         st.sidebar.subheader("Broadcast News")
