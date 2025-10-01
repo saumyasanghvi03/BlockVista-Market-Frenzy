@@ -31,15 +31,7 @@ OPTION_SYMBOLS = ['NIFTY_CALL', 'NIFTY_PUT']
 ALL_SYMBOLS = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL] + OPTION_SYMBOLS + FUTURES_SYMBOLS + LEVERAGED_ETFS
 
 # Game Mechanics Settings
-SLIPPAGE_THRESHOLD = 10
-BASE_SLIPPAGE_RATE = 0.005
-MARGIN_REQUIREMENT = 0.2
 ADMIN_PASSWORD = "100370" # Set your admin password here
-BID_ASK_SPREAD = 0.001 # 0.1% spread
-SHORT_SQUEEZE_THRESHOLD = 3 # Number of players shorting to trigger potential squeeze
-HFT_REBATE_WINDOW = 60 # seconds
-HFT_REBATE_TRADES = 5 # trades
-HFT_REBATE_AMOUNT = 5000 # cash bonus
 
 # --- Pre-built News Headlines ---
 PRE_BUILT_NEWS = [
@@ -93,7 +85,14 @@ class GameState:
         self.block_deal_offer = None
         self.closing_warning_triggered = False
         self.difficulty_level = 1
-        self.current_margin_requirement = MARGIN_REQUIREMENT
+        self.current_margin_requirement = 0.2
+        self.bid_ask_spread = 0.001
+        self.slippage_threshold = 10
+        self.base_slippage_rate = 0.005
+        self.hft_rebate_window = 60
+        self.hft_rebate_trades = 5
+        self.hft_rebate_amount = 5000
+        self.short_squeeze_threshold = 3
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices and difficulty."""
@@ -269,12 +268,12 @@ def get_historical_data(symbols, period="6mo"):
 def calculate_slippage(player, symbol, qty, action):
     game_state = get_game_state()
     liquidity_level = game_state.liquidity.get(symbol, 1.0)
-    if qty <= SLIPPAGE_THRESHOLD: return 1.0
+    if qty <= game_state.slippage_threshold: return 1.0
     
     slippage_multiplier = player.get('slippage_multiplier', 1.0)
     
-    excess_qty = qty - SLIPPAGE_THRESHOLD
-    slippage_rate = (BASE_SLIPPAGE_RATE / max(0.1, liquidity_level)) * slippage_multiplier
+    excess_qty = qty - game_state.slippage_threshold
+    slippage_rate = (game_state.base_slippage_rate / max(0.1, liquidity_level)) * slippage_multiplier
     slippage_mult = 1 + (slippage_rate * excess_qty) * (1 if action == "Buy" else -1)
     return max(0.9, min(1.1, slippage_mult))
 
@@ -1077,3 +1076,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
