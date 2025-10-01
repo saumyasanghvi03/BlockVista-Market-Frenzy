@@ -91,6 +91,8 @@ class GameState:
         self.news_feed = []
         self.auto_square_off_complete = False
         self.block_deal_offer = None
+        self.difficulty_level = 1
+        self.current_margin_requirement = MARGIN_REQUIREMENT
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices."""
