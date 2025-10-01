@@ -317,7 +317,8 @@ def calculate_indicator(indicator, symbol):
 def render_sidebar():
     game_state = get_game_state()
     
-    if 'player_name' not in st.session_state:
+    # Player Login/Logout
+    if 'player' not in st.query_params:
         st.sidebar.title("📝 Game Entry")
         player_name = st.sidebar.text_input("Enter Name", key="name_input")
         mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
@@ -333,16 +334,16 @@ def render_sidebar():
                     "value_history": [], "trade_timestamps": []
                 }
                 game_state.transactions[player_name] = []
-                st.session_state.player_name = player_name
-                st.sidebar.success(f"{player_name} joined as {mode}!")
+                st.query_params["player"] = player_name
                 st.rerun()
             else: st.sidebar.error("Name is invalid or already taken!")
     else:
-        st.sidebar.success(f"Logged in as {st.session_state.player_name}")
+        st.sidebar.success(f"Logged in as {st.query_params['player']}")
         if st.sidebar.button("Logout"):
-            del st.session_state.player_name
+            st.query_params.clear()
             st.rerun()
 
+    # Admin Login
     st.sidebar.title("🔐 Admin Login")
     password = st.sidebar.text_input("Enter Password", type="password")
 
@@ -350,8 +351,9 @@ def render_sidebar():
         st.session_state.role = 'admin'
         st.sidebar.success("Admin Access Granted")
 
+    if st.session_state.get('role') == 'admin':
         if st.sidebar.button("Logout Admin"):
-            del st.session_state.role
+            del st.session_state['role']
             st.rerun()
 
         st.sidebar.title("⚙️ Admin Controls")
@@ -436,7 +438,7 @@ def render_main_interface(prices):
 
     if st.session_state.get('role') == 'admin':
         render_global_views(prices)
-    elif 'player_name' in st.session_state:
+    elif 'player' in st.query_params:
         col1, col2 = st.columns([1, 1]); 
         with col1: render_trade_execution_panel(prices)
         with col2: render_global_views(prices)
@@ -495,7 +497,7 @@ def render_trade_execution_panel(prices):
     
     with st.container(border=True):
         st.subheader("Trade Execution Panel")
-        acting_player = st.session_state.get('player_name')
+        acting_player = st.query_params.get("player")
         if not acting_player or acting_player not in game_state.players:
             st.warning("Please join the game to access your trading terminal.")
             return
@@ -984,7 +986,7 @@ def main():
     if game_state.game_status == "Running": 
         time.sleep(1)
         st.rerun()
-    elif game_state.game_status == "Stopped":
+    else: # Slower refresh for lobby/stopped state
         time.sleep(5)
         st.rerun()
 
