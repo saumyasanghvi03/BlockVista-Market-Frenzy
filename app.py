@@ -298,25 +298,33 @@ def calculate_indicator(indicator, symbol):
 # --- UI Functions ---
 def render_sidebar():
     game_state = get_game_state()
-    st.sidebar.title("📝 Game Entry")
-    player_name = st.sidebar.text_input("Enter Name", key="name_input")
-    mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
-    
-    if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
-        if player_name and player_name.strip() and player_name not in game_state.players:
-            starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
-            game_state.players[player_name] = {
-                "name": player_name, "mode": mode, "capital": starting_capital, 
-                "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, 
-                "pending_orders": [], "algo": "Off", "custom_algos": {},
-                "slippage_multiplier": 0.5 if mode == "HFT" else 1.0,
-                "value_history": []
-            }
-            game_state.transactions[player_name] = []
-            st.sidebar.success(f"{player_name} joined as {mode}!")
+
+    if 'player_name' not in st.session_state:
+        st.sidebar.title("📝 Game Entry")
+        player_name = st.sidebar.text_input("Enter Name", key="name_input")
+        mode = st.sidebar.radio("Select Mode", ["Trader", "HFT", "HNI"], key="mode_select")
+        
+        if st.sidebar.button("Join Game", disabled=(game_state.game_status == "Running")):
+            if player_name and player_name.strip() and player_name not in game_state.players:
+                starting_capital = INITIAL_CAPITAL * 5 if mode == "HNI" else INITIAL_CAPITAL
+                game_state.players[player_name] = {
+                    "name": player_name, "mode": mode, "capital": starting_capital, 
+                    "holdings": {}, "pnl": 0, "leverage": 1.0, "margin_calls": 0, 
+                    "pending_orders": [], "algo": "Off", "custom_algos": {},
+                    "slippage_multiplier": 0.5 if mode == "HFT" else 1.0,
+                    "value_history": []
+                }
+                game_state.transactions[player_name] = []
+                st.session_state.player_name = player_name
+                st.sidebar.success(f"{player_name} joined as {mode}!")
+                st.rerun()
+            else: st.sidebar.error("Name is invalid or already taken!")
+    else:
+        st.sidebar.success(f"Logged in as {st.session_state.player_name}")
+        if st.sidebar.button("Logout"):
+            del st.session_state.player_name
             st.rerun()
-        else: st.sidebar.error("Name is invalid or already taken!")
-    
+
     st.sidebar.title("🔐 Admin Login")
     password = st.sidebar.text_input("Enter Password", type="password")
 
@@ -325,7 +333,7 @@ def render_sidebar():
         st.sidebar.success("Admin Access Granted")
 
         if st.sidebar.button("Logout Admin"):
-            st.session_state.role = 'player'
+            del st.session_state.role
             st.rerun()
 
         st.sidebar.title("⚙️ Admin Controls")
@@ -409,10 +417,13 @@ def render_main_interface(prices):
 
     if st.session_state.get('role') == 'admin':
         render_global_views(prices)
-    else:
+    elif 'player_name' in st.session_state:
         col1, col2 = st.columns([1, 1]); 
         with col1: render_trade_execution_panel(prices)
         with col2: render_global_views(prices)
+    else:
+        st.info("Welcome to the BlockVista Market Frenzy! Please join the game from the sidebar to start trading.")
+        render_global_views(prices)
 
 
 def render_global_views(prices):
@@ -465,33 +476,33 @@ def render_trade_execution_panel(prices):
     
     with st.container(border=True):
         st.subheader("Trade Execution Panel")
-        player_list = list(game_state.players.keys())
-        if not player_list: st.warning("No players have joined the game yet."); return
-        acting_player = st.selectbox("Select Your Player to Trade", player_list)
+        acting_player = st.session_state.get('player_name')
+        if not acting_player or acting_player not in game_state.players:
+            st.warning("Please join the game to access your trading terminal.")
+            return
         
-        if acting_player and acting_player in game_state.players:
-            player = game_state.players[acting_player]
-            st.markdown(f"**{acting_player}'s Terminal (Mode: {player['mode']})**")
-            
-            holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
-            total_value = player['capital'] + holdings_value
-            pnl = total_value - (INITIAL_CAPITAL * 5 if player['mode'] == 'HNI' else INITIAL_CAPITAL)
-            player['pnl'] = pnl
-            pnl_arrow = "🔼" if pnl >= 0 else "🔽"
+        player = game_state.players[acting_player]
+        st.markdown(f"**{acting_player}'s Terminal (Mode: {player['mode']})**")
+        
+        holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
+        total_value = player['capital'] + holdings_value
+        pnl = total_value - (INITIAL_CAPITAL * 5 if player['mode'] == 'HNI' else INITIAL_CAPITAL)
+        player['pnl'] = pnl
+        pnl_arrow = "🔼" if pnl >= 0 else "🔽"
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Cash", format_indian_currency(player['capital']))
-            c2.metric("Portfolio Value", format_indian_currency(total_value))
-            c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Cash", format_indian_currency(player['capital']))
+        c2.metric("Portfolio Value", format_indian_currency(total_value))
+        c3.metric("P&L", format_indian_currency(pnl), f"{pnl_arrow}")
 
-            tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Transaction History", "📊 Strategy & Insights"]
-            tab1, tab2, tab3, tab4 = st.tabs(tabs)
-            is_trade_disabled = game_state.game_status != "Running"
+        tabs = ["👨‍💻 Trade Terminal", "🤖 Algo Trading", "📂 Transaction History", "📊 Strategy & Insights"]
+        tab1, tab2, tab3, tab4 = st.tabs(tabs)
+        is_trade_disabled = game_state.game_status != "Running"
 
-            with tab1: render_trade_interface(acting_player, player, prices, is_trade_disabled)
-            with tab2: render_algo_trading_tab(acting_player, player, is_trade_disabled)
-            with tab3: render_transaction_history(acting_player)
-            with tab4: render_strategy_tab(player)
+        with tab1: render_trade_interface(acting_player, player, prices, is_trade_disabled)
+        with tab2: render_algo_trading_tab(acting_player, player, is_trade_disabled)
+        with tab3: render_transaction_history(acting_player)
+        with tab4: render_strategy_tab(player)
 
 def render_trade_interface(player_name, player, prices, disabled):
     order_type_tabs = ["Market", "Limit", "Stop-Loss"]
