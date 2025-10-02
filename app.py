@@ -1,3 +1,5 @@
+# BlockVista Market Frenzy - Tournament Edition with Auto-Qualification
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -82,10 +84,9 @@ def get_game_state():
             self.transactions = {}
             self.market_sentiment = {s: 0 for s in ALL_SYMBOLS}
             self.liquidity = {s: random.uniform(0.5, 1.0) for s in ALL_SYMBOLS}
-            self.event_active = False
-            self.event_type = None
-            self.event_target_symbol = None
-            self.event_end = 0
+            self.last_event_time = 0
+            self.event_cooldown = 60
+            self.manual_event_pending = None
             self.volatility_multiplier = 1.0
             self.news_feed = []
             self.auto_square_off_complete = False
@@ -108,7 +109,6 @@ def get_game_state():
             self.team_scores = {'A': 0, 'B': 0}
             self.price_stability_counter = {s: 0 for s in ALL_SYMBOLS}
             self.admin_trading_halt = False
-            self.manual_event_pending = None
             self.qualified_players = set()  # Track players who qualify for next level
             self.eliminated_players = set()  # Track eliminated players
             self.level_results = {}  # Store level completion results
@@ -139,6 +139,103 @@ def play_sound(sound_type):
 def announce_news(headline):
     safe_headline = headline.replace("'", "\\'").replace("\n", " ")
     st.components.v1.html(f'<script>if ("speechSynthesis" in window) {{const u = new SpeechSynthesisUtterance("{safe_headline}"); u.rate = 1.2; speechSynthesis.speak(u);}}</script>', height=0)
+
+# --- MISSING FUNCTION: run_game_tick ---
+def run_game_tick(prices):
+    """Handle manual events, random events, and market dynamics for each tick"""
+    game_state = get_game_state()
+    current_time = time.time()
+    
+    # Process manual events first (admin triggered)
+    if game_state.manual_event_pending:
+        event = game_state.manual_event_pending
+        prices = apply_event_adjustment(prices, event['type'], event.get('target_symbol'))
+        game_state.manual_event_pending = None
+        game_state.last_event_time = current_time
+    
+    # Process random events (only during running game)
+    elif (game_state.game_status == "Running" and 
+          current_time - game_state.last_event_time > game_state.event_cooldown and
+          random.random() < 0.02):  # 2% chance per tick
+        
+        event_types = ["Bull Rally", "Flash Crash", "Volatility Spike", "Sector Rotation"]
+        event_type = random.choice(event_types)
+        
+        # Symbol-specific events
+        if event_type in ["Symbol Bull Run", "Symbol Crash", "Short Squeeze"]:
+            target_symbol = random.choice(ALL_SYMBOLS)
+            prices = apply_event_adjustment(prices, event_type, target_symbol)
+        else:
+            prices = apply_event_adjustment(prices, event_type)
+            
+        game_state.last_event_time = current_time
+    
+    # Update player portfolio history
+    for player_name, player in game_state.players.items():
+        if player_name not in game_state.eliminated_players:
+            holdings_value = sum(prices.get(s, 0) * q for s, q in player['holdings'].items())
+            total_value = player['capital'] + holdings_value
+            player['value_history'].append(total_value)
+            if len(player['value_history']) > 100:  # Keep last 100 values
+                player['value_history'].pop(0)
+    
+    return prices
+
+def apply_event_adjustment(prices, event_type, target_symbol=None):
+    """Apply market event adjustments to prices"""
+    game_state = get_game_state()
+    prices = prices.copy()
+    
+    event_effects = {
+        "Bull Rally": lambda p: {k: max(0.01, v * random.uniform(1.05, 1.15)) for k, v in p.items()},
+        "Flash Crash": lambda p: {k: max(0.01, v * random.uniform(0.85, 0.95)) for k, v in p.items()},
+        "Symbol Bull Run": lambda p: {k: max(0.01, v * (1.25 if k == target_symbol else 1.0)) for k, v in p.items()},
+        "Symbol Crash": lambda p: {k: max(0.01, v * (0.75 if k == target_symbol else 1.0)) for k, v in p.items()},
+        "Short Squeeze": lambda p: {k: max(0.01, v * (1.35 if k == target_symbol else 1.0)) for k, v in p.items()},
+        "Volatility Spike": lambda p: {k: max(0.01, v * (1 + random.uniform(-0.03, 0.03) * 2)) for k, v in p.items()},
+        "Sector Rotation": lambda p: apply_sector_rotation(p)
+    }
+    
+    if event_type in event_effects:
+        message = f"⚡ {event_type}!"
+        if target_symbol:
+            message = f"⚡ {event_type} on {target_symbol.replace('.NS', '')}!"
+        
+        st.toast(message, icon="🎪")
+        game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {message}")
+        if len(game_state.news_feed) > 5: 
+            game_state.news_feed.pop()
+            
+        prices = event_effects[event_type](prices)
+        announce_news(message)
+        
+    return prices
+
+def apply_sector_rotation(prices):
+    """Apply sector rotation - some sectors up, some down"""
+    sectors = {
+        'banks': [s for s in NIFTY50_SYMBOLS if 'BANK' in s],
+        'tech': [s for s in NIFTY50_SYMBOLS if any(x in s for x in ['TECH', 'INFY', 'TCS', 'HCL'])],
+        'consumers': [s for s in NIFTY50_SYMBOLS if any(x in s for x in ['ITC', 'HINDUNILVR', 'ASIANPAINT'])]
+    }
+    
+    # Randomly choose winning and losing sectors
+    sector_keys = list(sectors.keys())
+    random.shuffle(sector_keys)
+    winning_sectors = sector_keys[:1]
+    losing_sectors = sector_keys[1:2]
+    
+    for sector in winning_sectors:
+        for symbol in sectors[sector]:
+            if symbol in prices:
+                prices[symbol] *= random.uniform(1.08, 1.15)
+                
+    for sector in losing_sectors:
+        for symbol in sectors[sector]:
+            if symbol in prices:
+                prices[symbol] *= random.uniform(0.85, 0.95)
+                
+    return prices
 
 # --- Enhanced Game Flow Management with Qualification System ---
 def update_game_state():
@@ -224,7 +321,7 @@ def check_level_qualifications():
         st.toast(f"🎯 Level {current_level} Results: {qualified_count} players qualified!", icon="✅")
         play_sound('qualification')
     if eliminated_count > 0:
-        st.toft(f"😔 {eliminated_count} players eliminated from Level {current_level}", icon="💔")
+        st.toast(f"😔 {eliminated_count} players eliminated from Level {current_level}", icon="💔")
         play_sound('elimination')
 
 def get_remaining_time():
@@ -309,34 +406,6 @@ def calculate_derived_prices(base_prices):
     return prices
 
 # --- Enhanced Event System with Admin Controls ---
-def apply_event_adjustment(prices, event_type, target_symbol=None):
-    game_state = get_game_state()
-    prices = prices.copy()
-    
-    event_effects = {
-        "Bull Rally": lambda p: {k: max(0.01, v * random.uniform(1.05, 1.15)) for k, v in p.items()},
-        "Flash Crash": lambda p: {k: max(0.01, v * random.uniform(0.85, 0.95)) for k, v in p.items()},
-        "Symbol Bull Run": lambda p: {k: max(0.01, v * (1.25 if k == target_symbol else 1.0)) for k, v in p.items()},
-        "Symbol Crash": lambda p: {k: max(0.01, v * (0.75 if k == target_symbol else 1.0)) for k, v in p.items()},
-        "Short Squeeze": lambda p: {k: max(0.01, v * (1.35 if k == target_symbol else 1.0)) for k, v in p.items()},
-        "Volatility Spike": lambda p: {k: max(0.01, v * (1 + random.uniform(-0.03, 0.03) * 2)) for k, v in p.items()},
-    }
-    
-    if event_type in event_effects:
-        message = f"⚡ {event_type}!"
-        if target_symbol:
-            message = f"⚡ {event_type} on {target_symbol.replace('.NS', '')}!"
-        
-        st.toast(message, icon="🎪")
-        game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {message}")
-        if len(game_state.news_feed) > 5: 
-            game_state.news_feed.pop()
-            
-        prices = event_effects[event_type](prices)
-        announce_news(message)
-        
-    return prices
-
 def trigger_manual_event(event_type, target_symbol=None):
     """Admin function to manually trigger market events"""
     game_state = get_game_state()
@@ -441,7 +510,170 @@ def log_transaction(player_name, action, symbol, qty, price, total, is_algo=Fals
         symbol, qty, price, total
     ])
 
-# --- Enhanced UI Components with Qualification Display ---
+def auto_square_off_positions(prices):
+    """Auto square off all positions at game end"""
+    game_state = get_game_state()
+    for player_name, player in game_state.players.items():
+        for symbol, qty in list(player['holdings'].items()):
+            if qty != 0:
+                action = "Sell" if qty > 0 else "Buy"
+                execute_trade(player_name, player, action, symbol, abs(qty), prices)
+        player['value_history'].append(player['capital'])
+
+# --- UI Components ---
+def format_indian_currency(n):
+    if n is None: return "₹0.00"
+    n = float(n)
+    if abs(n) >= 10000000:
+        return f"₹{n/10000000:.2f}Cr"
+    elif abs(n) >= 100000:
+        return f"₹{n/100000:.2f}L"
+    elif abs(n) >= 1000:
+        return f"₹{n/1000:.1f}K"
+    else:
+        return f"₹{n:,.2f}"
+
+def calculate_sharpe_ratio(values):
+    if len(values) < 2: return 0.0
+    returns = pd.Series(values).pct_change().dropna()
+    if returns.std() == 0: return 0.0
+    return (returns.mean() / returns.std()) * np.sqrt(252)
+
+def render_trade_interface(player_name, player, prices, is_trade_disabled):
+    st.subheader("⚡ Quick Trade")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        symbol = st.selectbox("Symbol", ALL_SYMBOLS, key="trade_symbol")
+    with col2:
+        action = st.selectbox("Action", ["Buy", "Sell", "Short"], key="trade_action")
+    with col3:
+        qty = st.number_input("Quantity", min_value=1, max_value=10000, value=10, key="trade_qty")
+    
+    if st.button("Execute Trade", type="primary", disabled=is_trade_disabled, use_container_width=True):
+        if execute_trade(player_name, player, action, symbol, qty, prices):
+            st.success("Trade executed successfully!")
+            play_sound('success')
+        else:
+            play_sound('error')
+    
+    # Display current holdings
+    st.subheader("📦 Your Holdings")
+    if player['holdings']:
+        holdings_data = []
+        for symbol, qty in player['holdings'].items():
+            if qty != 0:
+                current_price = prices.get(symbol, 0)
+                value = current_price * qty
+                holdings_data.append({
+                    'Symbol': symbol,
+                    'Quantity': qty,
+                    'Avg Price': 'N/A',  # Simplified for this example
+                    'Current Price': current_price,
+                    'Value': value
+                })
+        
+        if holdings_data:
+            holdings_df = pd.DataFrame(holdings_data)
+            st.dataframe(holdings_df, use_container_width=True)
+    else:
+        st.info("No holdings yet. Start trading!")
+
+def render_algo_trading_tab(player_name, player, is_trade_disabled):
+    st.subheader("🤖 Algorithmic Trading")
+    
+    algo_options = ["Off", "Momentum", "Mean Reversion", "Market Making"]
+    selected_algo = st.selectbox("Select Algorithm", algo_options, index=0)
+    
+    if selected_algo != "Off":
+        st.info(f"🔄 {selected_algo} algorithm is now active")
+        player['algo'] = selected_algo
+        
+        if st.button("Run Single Algo Cycle", disabled=is_trade_disabled):
+            st.info("Algo cycle completed (simulated)")
+    else:
+        player['algo'] = "Off"
+
+def render_transaction_history(player_name):
+    game_state = get_game_state()
+    st.subheader("📋 Transaction History")
+    
+    if player_name in game_state.transactions and game_state.transactions[player_name]:
+        trans_df = pd.DataFrame(
+            game_state.transactions[player_name],
+            columns=["Time", "Action", "Symbol", "Qty", "Price", "Total"]
+        )
+        st.dataframe(trans_df, use_container_width=True)
+    else:
+        st.info("No transactions yet.")
+
+def render_strategy_tab(player, prices):
+    st.subheader("📈 Portfolio Analysis")
+    
+    # Simple portfolio metrics
+    holdings_value = sum(prices.get(s, 0) * q for s, q in player['holdings'].items())
+    total_value = player['capital'] + holdings_value
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Cash Allocation", f"{(player['capital'] / total_value * 100):.1f}%")
+        st.metric("Stock Allocation", f"{(holdings_value / total_value * 100):.1f}%")
+    with col2:
+        st.metric("Number of Holdings", len(player['holdings']))
+        st.metric("Total Trades", len(player.get('trade_timestamps', [])))
+    
+    # Simple chart of portfolio value history
+    if len(player['value_history']) > 1:
+        st.subheader("📊 Portfolio Value Trend")
+        chart_data = pd.DataFrame({
+            'Portfolio Value': player['value_history']
+        })
+        st.line_chart(chart_data)
+
+def render_player_qualification_status(player_name, prices):
+    """Show qualification status and progress for current player"""
+    game_state = get_game_state()
+    
+    if player_name in game_state.eliminated_players:
+        st.error("## ❌ Better Luck Next Time!")
+        st.info("""
+        You have been eliminated from the current level. 
+        
+        **What happened?**
+        - You didn't meet the minimum portfolio value requirement
+        - Watch the remaining players compete in the next levels
+        - Join again in the next tournament!
+        
+        *Tip for next time: Focus on risk management and consistent gains.*
+        """)
+        return False
+        
+    elif game_state.current_level < game_state.total_levels and player_name not in game_state.qualified_players:
+        # Show qualification progress
+        current_criteria = QUALIFICATION_CRITERIA.get(game_state.current_level, {})
+        if current_criteria:
+            min_required = current_criteria["min_portfolio_value"]
+            holdings_value = sum(prices.get(s, 0) * q for s, q in game_state.players[player_name]['holdings'].items())
+            total_value = game_state.players[player_name]['capital'] + holdings_value
+            
+            progress = min(100, (total_value / min_required) * 100)
+            
+            st.subheader("🎯 Qualification Progress")
+            st.write(f"**Target for Level {game_state.current_level}:** {format_indian_currency(min_required)}")
+            st.write(f"**Your Portfolio:** {format_indian_currency(total_value)}")
+            
+            # Progress bar
+            st.progress(progress / 100)
+            st.write(f"Progress: {progress:.1f}%")
+            
+            if total_value >= min_required:
+                st.success("✅ You have qualified for the next level!")
+            else:
+                remaining = max(0, min_required - total_value)
+                st.warning(f"💰 Need {format_indian_currency(remaining)} more to qualify")
+    
+    return True
+
 def render_left_sidebar():
     game_state = get_game_state()
     
@@ -589,53 +821,146 @@ def render_left_sidebar():
             with col2:
                 if st.button("💥 Stock Crash", use_container_width=True):
                     trigger_manual_event("Symbol Crash", f"{target_stock}.NS")
-                    
-        elif password:
-            st.error("❌ Incorrect Password")
 
-def render_player_qualification_status(player_name, prices):
-    """Show qualification status and progress for current player"""
+def render_global_views(prices, is_admin=False):
+    with st.container(border=True):
+        st.subheader("🌐 Global Market View")
+        
+        # Show qualification status for all players (admin view)
+        if is_admin:
+            game_state = get_game_state()
+            st.subheader("🎯 Player Qualification Status")
+            qualified_count = len(game_state.qualified_players)
+            eliminated_count = len(game_state.eliminated_players)
+            active_count = len(game_state.players) - eliminated_count
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("✅ Qualified", qualified_count)
+            col2.metric("🎯 Active", active_count)
+            col3.metric("❌ Eliminated", eliminated_count)
+        
+        # News feed
+        st.markdown("---")
+        st.subheader("📰 Live News Feed")
+        game_state = get_game_state()
+        news_feed = getattr(game_state, 'news_feed', [])
+        if news_feed:
+            for news in news_feed[:5]:
+                st.info(news)
+        else:
+            st.info("No market news at the moment.")
+
+        # Leaderboard
+        st.markdown("---")
+        st.subheader("🏆 Live Leaderboard")
+        render_leaderboard(prices)
+
+        # Market data
+        st.markdown("---")
+        st.subheader("📈 Live Market Data")
+        render_live_market_table(prices)
+
+def render_leaderboard(prices):
     game_state = get_game_state()
+    lb = []
+    for pname, pdata in game_state.players.items():
+        holdings_value = sum(prices.get(s, 0) * q for s, q in pdata['holdings'].items())
+        total_value = pdata['capital'] + holdings_value
+        starting_capital = INITIAL_CAPITAL * 5 if pdata['mode'] == 'HNI' else INITIAL_CAPITAL
+        pnl = total_value - starting_capital
+        sharpe_ratio = calculate_sharpe_ratio(pdata.get('value_history', []))
+        
+        # Add qualification status
+        status = "✅ Qualified" if pname in game_state.qualified_players else "❌ Eliminated" if pname in game_state.eliminated_players else "🎯 Active"
+        
+        lb.append((pname, pdata['mode'], total_value, pnl, sharpe_ratio, status))
     
-    if player_name in game_state.eliminated_players:
-        st.error("## ❌ Better Luck Next Time!")
-        st.info("""
-        You have been eliminated from the current level. 
+    if lb:
+        lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L", "Sharpe Ratio", "Status"])
+        lb_df = lb_df.sort_values("Portfolio Value", ascending=False).reset_index(drop=True)
         
-        **What happened?**
-        - You didn't meet the minimum portfolio value requirement
-        - Watch the remaining players compete in the next levels
-        - Join again in the next tournament!
+        # Color coding based on status
+        def color_status(val):
+            if val == "✅ Qualified": return 'color: green'
+            elif val == "❌ Eliminated": return 'color: red'
+            return 'color: orange'
         
-        *Tip for next time: Focus on risk management and consistent gains.*
-        """)
-        return False
+        styled_df = lb_df.style.format({
+            "Portfolio Value": format_indian_currency,
+            "P&L": format_indian_currency,
+            "Sharpe Ratio": "{:.2f}"
+        }).applymap(color_status, subset=['Status'])
         
-    elif game_state.current_level < game_state.total_levels and player_name not in game_state.qualified_players:
-        # Show qualification progress
-        current_criteria = QUALIFICATION_CRITERIA.get(game_state.current_level, {})
-        if current_criteria:
-            min_required = current_criteria["min_portfolio_value"]
-            holdings_value = sum(prices.get(s, 0) * q for s, q in game_state.players[player_name]['holdings'].items())
-            total_value = game_state.players[player_name]['capital'] + holdings_value
-            
-            progress = min(100, (total_value / min_required) * 100)
-            
-            st.subheader("🎯 Qualification Progress")
-            st.write(f"**Target for Level {game_state.current_level}:** {format_indian_currency(min_required)}")
-            st.write(f"**Your Portfolio:** {format_indian_currency(total_value)}")
-            
-            # Progress bar
-            st.progress(progress / 100)
-            st.write(f"Progress: {progress:.1f}%")
-            
-            if total_value >= min_required:
-                st.success("✅ You have qualified for the next level!")
-            else:
-                remaining = max(0, min_required - total_value)
-                st.warning(f"💰 Need {format_indian_currency(remaining)} more to qualify")
+        st.dataframe(styled_df, use_container_width=True)
+        
+        if game_state.game_status == "Finished":
+            if not getattr(game_state, 'auto_square_off_complete', False):
+                auto_square_off_positions(prices)
+                game_state.auto_square_off_complete = True
+                st.rerun()
+
+            st.balloons()
+            # Find the winner (highest among qualified players)
+            qualified_winners = lb_df[lb_df['Status'] == '✅ Qualified']
+            if not qualified_winners.empty:
+                winner = qualified_winners.iloc[0]
+                st.success(f"🎉 Tournament Winner: **{winner['Player']}**! 🎉")
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("🏆 Final Portfolio", format_indian_currency(winner['Portfolio Value']))
+                col2.metric("💰 Total P&L", format_indian_currency(winner['P&L']))
+                col3.metric("⚡ Sharpe Ratio", f"{winner['Sharpe Ratio']:.2f}")
+
+def render_live_market_table(prices):
+    """Display current market prices"""
+    market_data = []
+    for symbol in ALL_SYMBOLS[:15]:  # Show first 15 symbols to avoid clutter
+        price = prices.get(symbol, 0)
+        if price > 0:
+            market_data.append({
+                'Symbol': symbol.replace('.NS', ''),
+                'Price': format_indian_currency(price),
+                'Raw Price': price
+            })
     
-    return True
+    if market_data:
+        market_df = pd.DataFrame(market_data)
+        market_df = market_df.sort_values('Raw Price', ascending=False)
+        st.dataframe(market_df[['Symbol', 'Price']], use_container_width=True, hide_index=True)
+
+def render_right_sidebar(prices):
+    with st.sidebar:
+        st.title("📊 Quick Stats")
+        
+        game_state = get_game_state()
+        
+        # Game status
+        st.subheader("🎮 Game Status")
+        status_color = {
+            "Running": "🟢",
+            "Stopped": "🔴", 
+            "Break": "🟡",
+            "Finished": "🔵"
+        }
+        st.write(f"{status_color.get(game_state.game_status, '⚪')} {game_state.game_status}")
+        
+        if game_state.game_status == "Running":
+            remaining, time_type = get_remaining_time()
+            if time_type == "level":
+                minutes, seconds = divmod(int(remaining), 60)
+                st.write(f"⏰ Level {game_state.current_level} ends in: {minutes:02d}:{seconds:02d}")
+            elif time_type == "break":
+                st.write(f"⏸️ Break ends in: {int(remaining)}s")
+        
+        # Player count
+        active_players = len([p for p in game_state.players if p not in game_state.eliminated_players])
+        st.write(f"👥 Active Players: {active_players}/{len(game_state.players)}")
+        
+        # Market sentiment
+        st.subheader("📈 Market Sentiment")
+        avg_sentiment = np.mean(list(game_state.market_sentiment.values())) if game_state.market_sentiment else 0
+        sentiment_label = "🐂 Bullish" if avg_sentiment > 0.1 else "🐻 Bearish" if avg_sentiment < -0.1 else "➡️ Neutral"
+        st.write(f"{sentiment_label} ({avg_sentiment:.2f})")
 
 def render_main_interface(prices):
     game_state = get_game_state()
@@ -710,7 +1035,6 @@ def render_main_interface(prices):
         st.info("🎯 Welcome to BlockVista Market Frenzy Tournament Edition! Join the game from the sidebar.")
         render_global_views(prices)
 
-# --- Rest of the UI functions remain similar but with qualification checks ---
 def render_trade_execution_panel(prices):
     game_state = get_game_state()
     
@@ -755,122 +1079,6 @@ def render_trade_execution_panel(prices):
         with tab4:
             render_strategy_tab(player, prices)
 
-# ... (Other UI functions remain largely the same, just ensure they check for eliminated players)
-
-def format_indian_currency(n):
-    if n is None: return "₹0.00"
-    n = float(n)
-    if abs(n) >= 10000000:
-        return f"₹{n/10000000:.2f}Cr"
-    elif abs(n) >= 100000:
-        return f"₹{n/100000:.2f}L"
-    elif abs(n) >= 1000:
-        return f"₹{n/1000:.1f}K"
-    else:
-        return f"₹{n:,.2f}"
-
-def calculate_sharpe_ratio(values):
-    if len(values) < 2: return 0.0
-    returns = pd.Series(values).pct_change().dropna()
-    if returns.std() == 0: return 0.0
-    return (returns.mean() / returns.std()) * np.sqrt(252)
-
-# ... (Include all other necessary functions from previous versions)
-
-def render_global_views(prices, is_admin=False):
-    with st.container(border=True):
-        st.subheader("🌐 Global Market View")
-        
-        # Show qualification status for all players (admin view)
-        if is_admin:
-            game_state = get_game_state()
-            st.subheader("🎯 Player Qualification Status")
-            qualified_count = len(game_state.qualified_players)
-            eliminated_count = len(game_state.eliminated_players)
-            active_count = len(game_state.players) - eliminated_count
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("✅ Qualified", qualified_count)
-            col2.metric("🎯 Active", active_count)
-            col3.metric("❌ Eliminated", eliminated_count)
-        
-        # News feed
-        st.markdown("---")
-        st.subheader("📰 Live News Feed")
-        game_state = get_game_state()
-        news_feed = getattr(game_state, 'news_feed', [])
-        if news_feed:
-            for news in news_feed[:5]:
-                st.info(news)
-        else:
-            st.info("No market news at the moment.")
-
-        # Leaderboard
-        st.markdown("---")
-        st.subheader("🏆 Live Leaderboard")
-        render_leaderboard(prices)
-        
-        if is_admin:
-            st.markdown("---")
-            st.subheader("📊 Player Performance")
-            render_admin_performance_chart()
-
-        # Market data
-        st.markdown("---")
-        st.subheader("📈 Live Market Data")
-        render_live_market_table(prices)
-
-def render_leaderboard(prices):
-    game_state = get_game_state()
-    lb = []
-    for pname, pdata in game_state.players.items():
-        holdings_value = sum(prices.get(s, 0) * q for s, q in pdata['holdings'].items())
-        total_value = pdata['capital'] + holdings_value
-        starting_capital = INITIAL_CAPITAL * 5 if pdata['mode'] == 'HNI' else INITIAL_CAPITAL
-        pnl = total_value - starting_capital
-        sharpe_ratio = calculate_sharpe_ratio(pdata.get('value_history', []))
-        
-        # Add qualification status
-        status = "✅ Qualified" if pname in game_state.qualified_players else "❌ Eliminated" if pname in game_state.eliminated_players else "🎯 Active"
-        
-        lb.append((pname, pdata['mode'], total_value, pnl, sharpe_ratio, status))
-    
-    if lb:
-        lb_df = pd.DataFrame(lb, columns=["Player", "Mode", "Portfolio Value", "P&L", "Sharpe Ratio", "Status"])
-        lb_df = lb_df.sort_values("Portfolio Value", ascending=False).reset_index(drop=True)
-        
-        # Color coding based on status
-        def color_status(val):
-            if val == "✅ Qualified": return 'color: green'
-            elif val == "❌ Eliminated": return 'color: red'
-            return 'color: orange'
-        
-        styled_df = lb_df.style.format({
-            "Portfolio Value": format_indian_currency,
-            "P&L": format_indian_currency,
-            "Sharpe Ratio": "{:.2f}"
-        }).applymap(color_status, subset=['Status'])
-        
-        st.dataframe(styled_df, use_container_width=True)
-        
-        if game_state.game_status == "Finished":
-            if not getattr(game_state, 'auto_square_off_complete', False):
-                auto_square_off_positions(prices)
-                game_state.auto_square_off_complete = True
-                st.rerun()
-
-            st.balloons()
-            # Find the winner (highest among qualified players)
-            qualified_winners = lb_df[lb_df['Status'] == '✅ Qualified']
-            if not qualified_winners.empty:
-                winner = qualified_winners.iloc[0]
-                st.success(f"🎉 Tournament Winner: **{winner['Player']}**! 🎉")
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("🏆 Final Portfolio", format_indian_currency(winner['Portfolio Value']))
-                col2.metric("💰 Total P&L", format_indian_currency(winner['P&L']))
-                col3.metric("⚡ Sharpe Ratio", f"{winner['Sharpe Ratio']:.2f}")
-
 # --- Main Application Loop with Fixed Session State ---
 def main():
     # Initialize all required session state variables
@@ -898,7 +1106,7 @@ def main():
         last_prices = game_state.prices if game_state.prices else game_state.base_real_prices
         current_prices = simulate_tick_prices(last_prices)
         prices_with_derivatives = calculate_derived_prices(current_prices)
-        final_prices = run_game_tick(prices_with_derivatives)
+        final_prices = run_game_tick(prices_with_derivatives)  # This was the missing function!
         
         game_state.prices = final_prices
         
@@ -923,8 +1131,6 @@ def main():
     if current_time - st.session_state.last_refresh > refresh_interval:
         st.session_state.last_refresh = current_time
         st.rerun()
-
-# Include all other necessary function implementations...
 
 if __name__ == "__main__":
     main()
