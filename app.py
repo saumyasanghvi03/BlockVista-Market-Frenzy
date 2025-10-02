@@ -365,6 +365,47 @@ def calculate_indicator(indicator, symbol):
         return ((price_now - price_then) / price_then) * 100
     return None
 
+def calculate_rsi(prices_series, period=14):
+    """
+    Calculate Relative Strength Index (RSI) for a given price series.
+    RSI is a momentum indicator that measures the speed and change of price movements.
+    Formula: RSI = 100 - (100 / (1 + RS)), where RS = Avg Gain / Avg Loss over period.
+    For future expansion in technical analysis tabs.
+    """
+    delta = prices_series.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=period, min_periods=1).mean()
+    avg_loss = loss.rolling(window=period, min_periods=1).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1] if not rsi.empty else None
+
+def calculate_macd(prices_series, short_period=12, long_period=26, signal_period=9):
+    """
+    Calculate Moving Average Convergence Divergence (MACD) for a given price series.
+    MACD shows the relationship between two EMAs of a security’s price.
+    Formula: MACD = short_EMA - long_EMA, Signal = EMA of MACD.
+    For future expansion in technical analysis tabs.
+    """
+    short_ema = prices_series.ewm(span=short_period, adjust=False).mean()
+    long_ema = prices_series.ewm(span=long_period, adjust=False).mean()
+    macd_line = short_ema - long_ema
+    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+    return macd_line.iloc[-1], signal_line.iloc[-1]
+
+def calculate_bollinger_bands(prices_series, period=20, std_dev=2):
+    """
+    Calculate Bollinger Bands for a given price series.
+    Bollinger Bands consist of a middle band (SMA) and two outer bands (SMA +/- std_dev * std).
+    Useful for identifying overbought/oversold conditions.
+    """
+    sma = prices_series.rolling(window=period).mean()
+    std = prices_series.rolling(window=period).std()
+    upper_band = sma + (std * std_dev)
+    lower_band = sma - (std * std_dev)
+    return upper_band.iloc[-1], sma.iloc[-1], lower_band.iloc[-1]
+
 # --- UI Functions ---
 def render_sidebar():
     game_state = get_game_state()
