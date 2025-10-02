@@ -130,13 +130,6 @@ PRE_BUILT_NEWS = [
     {"headline": "High short interest in {symbol} triggers a potential short squeeze!", "impact": "Short Squeeze"},
 ]
 
-# --- Quiz Questions ---
-QUIZ_QUESTIONS = [
-    {"question": "What does RSI stand for in technical analysis?", "options": ["Relative Strength Index", "Rapid Stock Increase", "Risk Sensitivity Indicator"], "answer": 0},
-    {"question": "Which candlestick pattern signals a bullish reversal?", "options": ["Doji", "Hammer", "Shooting Star"], "answer": 1},
-    {"question": "What is the primary role of SEBI in India?", "options": ["Regulate securities market", "Control inflation", "Manage foreign exchange"], "answer": 0},
-]
-
 # --- Enhanced Game State Management ---
 class GameState:
     """Enhanced game state with multi-level support"""
@@ -176,14 +169,22 @@ class GameState:
 
     def reset(self):
         """Reset game but preserve level progress"""
-        base_prices = self.base_real_prices
+        # Store current level before reset
         current_level = self.current_level
-        level_winners = self.level_winners
+        level_winners = self.level_winners.copy()
         
+        # Re-initialize
         self.__init__()
-        self.base_real_prices = base_prices
+        
+        # Restore level progress
         self.current_level = current_level
         self.level_winners = level_winners
+        
+        # Update level-specific settings
+        level_config = LEVEL_CONFIG[self.current_level]
+        self.volatility_multiplier = level_config["volatility"]
+        self.current_margin_requirement = level_config["margin_requirement"]
+        self.level_duration_seconds = level_config["duration_minutes"] * 60
 
     def advance_to_next_level(self):
         """Advance qualified players to the next level"""
@@ -200,22 +201,21 @@ class GameState:
         # Store winners for current level
         self.level_winners[self.current_level] = current_winners
         
-        # Advance winners to next level with their portfolios
+        # Store current players before clearing
+        old_players = self.players.copy()
+        
+        # Clear and recreate players for next level
         self.players = {}
         for player_name in current_winners:
-            old_player_data = None
-            # Find the old player data (we need to recreate since we're clearing players)
-            for name, data in list(self.players.items()):
-                if name == player_name:
-                    old_player_data = data
-                    break
-            
+            old_player_data = old_players.get(player_name)
             if old_player_data:
                 # Apply performance-based capital adjustment
                 performance_multiplier = self.calculate_performance_multiplier(old_player_data)
                 player_type_config = PLAYER_TYPES[old_player_data['mode']]
                 
+                holdings_value = sum(self.prices.get(s, 0) * q for s, q in old_player_data['holdings'].items())
                 new_capital = old_player_data['capital'] * performance_multiplier * player_type_config['winning_bonus']
+                total_start_value = new_capital + holdings_value
                 
                 self.players[player_name] = {
                     "name": player_name,
@@ -226,12 +226,12 @@ class GameState:
                     "leverage": 1.0,
                     "margin_calls": 0,
                     "pending_orders": [],
-                    "algo": "Off",
-                    "custom_algos": {},
+                    "algo": old_player_data.get('algo', 'Off'),
+                    "custom_algos": old_player_data.get('custom_algos', {}).copy(),
                     "slippage_multiplier": player_type_config['slippage_multiplier'],
-                    "value_history": [new_capital + sum(self.prices.get(s, 0) * q for s, q in old_player_data['holdings'].items())],
+                    "value_history": [total_start_value],
                     "trade_timestamps": [],
-                    "level_start_value": new_capital + sum(self.prices.get(s, 0) * q for s, q in old_player_data['holdings'].items())
+                    "level_start_value": total_start_value
                 }
         
         self.current_level = next_level
@@ -295,7 +295,7 @@ class GameState:
             
             # Check diversification
             if "diversification" in criteria:
-                unique_assets = len([s for s in player_data['holdings'].keys() if player_data['holdings'][s] != 0])
+                unique_assets = len([s for s in player_data['holdings'].keys() if player_data['holdings'].get(s, 0) != 0])
                 if unique_assets < criteria["diversification"]:
                     return False
             
@@ -603,6 +603,12 @@ def calculate_sharpe_ratio(value_history):
 def render_sidebar():
     game_state = get_game_state()
     
+    # Ensure game state is properly initialized
+    if not hasattr(game_state, 'current_level'):
+        game_state.current_level = 1
+        
+    current_level_config = LEVEL_CONFIG.get(game_state.current_level, LEVEL_CONFIG[1])
+    
     if 'player' not in st.query_params:
         st.sidebar.title("📝 Game Entry")
         player_name = st.sidebar.text_input("Enter Name", key="name_input")
@@ -614,7 +620,6 @@ def render_sidebar():
                                key="mode_select")
         
         # Show current level information
-        current_level_config = LEVEL_CONFIG[game_state.current_level]
         st.sidebar.info(f"**Current Level: {current_level_config['name']}**\n\n"
                        f"Duration: {current_level_config['duration_minutes']} min\n"
                        f"Volatility: {current_level_config['volatility']}x\n"
@@ -689,7 +694,7 @@ def render_sidebar():
                 st.sidebar.success(f"Level set to {level_config['name']}")
         
         # Show level criteria
-        level_criteria = LEVEL_CONFIG[current_level]["winning_criteria"]
+        level_criteria = current_level_config["winning_criteria"]
         st.sidebar.markdown("**Winning Criteria:**")
         for criterion, value in level_criteria.items():
             if criterion == "min_return":
@@ -787,7 +792,12 @@ def render_sidebar():
 
 def render_main_interface(prices):
     game_state = get_game_state()
-    current_level_config = LEVEL_CONFIG[game_state.current_level]
+    
+    # Ensure game state is properly initialized
+    if not hasattr(game_state, 'current_level'):
+        game_state.current_level = 1
+        
+    current_level_config = LEVEL_CONFIG.get(game_state.current_level, LEVEL_CONFIG[1])
     
     st.title(f"📈 {GAME_NAME}")
     st.components.v1.html('<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>', height=0)
@@ -912,8 +922,9 @@ def render_trade_execution_panel(prices):
         level_return = (total_value - level_start_value) / level_start_value if level_start_value > 0 else 0
         
         # Check qualification status
+        current_level_config = LEVEL_CONFIG.get(game_state.current_level, LEVEL_CONFIG[1])
         qualifies = game_state.check_player_qualifies(player, 
-            LEVEL_CONFIG[game_state.current_level]["winning_criteria"])
+            current_level_config["winning_criteria"])
         
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Cash", format_indian_currency(player['capital']))
@@ -1154,8 +1165,9 @@ def render_leaderboard(prices):
         sharpe_ratio = calculate_sharpe_ratio(pdata.get('value_history', []))
         
         # Check if player qualifies for next level
+        current_level_config = LEVEL_CONFIG.get(game_state.current_level, LEVEL_CONFIG[1])
         qualifies = game_state.check_player_qualifies(pdata, 
-            LEVEL_CONFIG[game_state.current_level]["winning_criteria"])
+            current_level_config["winning_criteria"])
         
         lb.append((pname, pdata['mode'], total_value, pdata['pnl'], 
                  level_return, sharpe_ratio, qualifies))
@@ -1437,7 +1449,7 @@ def main():
         st.title(f"👑 {GAME_NAME} - Admin Dashboard")
         st.components.v1.html('<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>', height=0)
         
-        current_level_config = LEVEL_CONFIG[game_state.current_level]
+        current_level_config = LEVEL_CONFIG.get(game_state.current_level, LEVEL_CONFIG[1])
         
         col1, col2, col3 = st.columns(3)
         with col1:
