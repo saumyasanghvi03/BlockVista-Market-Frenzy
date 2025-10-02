@@ -1,4 +1,3 @@
-```python
 # BlockVista Market Frenzy
 import streamlit as st
 import pandas as pd
@@ -1004,4 +1003,3 @@ def run_game_tick(prices):
 
 if __name__ == "__main__":
     main()
-```
