@@ -408,58 +408,9 @@ def render_sidebar():
         
         default_duration_minutes = int(getattr(game_state, 'round_duration_seconds', 1200) / 60)
         game_duration_minutes = st.sidebar.number_input("Game Duration (minutes)", min_value=1, value=default_duration_minutes, disabled=(game_state.game_status == "Running"))
-
-        game_state.volatility_multiplier = st.sidebar.slider("Market Volatility", 0.5, 5.0, getattr(game_state, 'volatility_multiplier', 1.0), 0.5)
         
         difficulty_index = getattr(game_state, 'difficulty_level', 1) - 1
         game_state.difficulty_level = st.sidebar.selectbox("Game Difficulty", [1, 2, 3], index=difficulty_index, format_func=lambda x: f"Level {x}", disabled=(game_state.game_status == "Running"))
-
-        game_state.current_margin_requirement = st.sidebar.slider("Margin Requirement (%)", 10, 50, int(getattr(game_state, 'current_margin_requirement', 0.2) * 100), 5) / 100.0
-
-
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("Broadcast News")
-        
-        news_options = {news['headline']: news['impact'] for news in PRE_BUILT_NEWS}
-        news_to_trigger = st.sidebar.selectbox("Select News to Publish", ["None"] + list(news_options.keys()))
-        
-        target_symbol = None
-        if news_to_trigger and "{symbol}" in news_to_trigger:
-            target_symbol = st.sidebar.selectbox("Target Symbol", [s.replace(".NS", "") for s in NIFTY50_SYMBOLS]) + ".NS"
-
-        if news_to_trigger != "None":
-            st.sidebar.info(f"Impact: {news_options[news_to_trigger]}")
-
-        if st.sidebar.button("Publish News"):
-            if news_to_trigger != "None":
-                selected_news = next((news for news in PRE_BUILT_NEWS if news["headline"] == news_to_trigger), None)
-                if selected_news:
-                    headline = selected_news['headline'].format(symbol=target_symbol.replace(".NS","") if target_symbol else "")
-                    game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {headline}")
-                    if len(game_state.news_feed) > 5: game_state.news_feed.pop()
-                    game_state.event_type = selected_news['impact']
-                    game_state.event_target_symbol = target_symbol
-                    game_state.event_active = True
-                    game_state.event_end = time.time() + 60
-                    st.toast(f"News Published!", icon="📰"); announce_news(headline)
-                    st.rerun()
-
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("Adjust Player Capital")
-        if game_state.players:
-            player_to_adjust = st.sidebar.selectbox("Select Player", list(game_state.players.keys()))
-            amount = st.sidebar.number_input("Amount", value=10000, step=1000)
-            c1, c2 = st.sidebar.columns(2)
-            if c1.button("Give Bonus"):
-                if player_to_adjust in game_state.players:
-                    game_state.players[player_to_adjust]['capital'] += amount
-                    st.toast(f"Gave {format_indian_currency(amount)} bonus to {player_to_adjust}", icon="💰")
-            if c2.button("Apply Penalty"):
-                if player_to_adjust in game_state.players:
-                    game_state.players[player_to_adjust]['capital'] -= amount
-                    st.toast(f"Applied {format_indian_currency(amount)} penalty to {player_to_adjust}", icon="💸")
-        else:
-            st.sidebar.info("No players to adjust.")
 
         st.sidebar.markdown("---")
         if st.sidebar.button("▶️ Start Game", type="primary"):
