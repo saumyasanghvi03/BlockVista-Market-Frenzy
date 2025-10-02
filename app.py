@@ -94,6 +94,7 @@ class GameState:
         self.hft_rebate_trades = 5
         self.hft_rebate_amount = 5000
         self.short_squeeze_threshold = 3
+        self.frozen_assets = {}
 
     def reset(self):
         """Resets the game to its initial state, but keeps the daily base prices and difficulty."""
