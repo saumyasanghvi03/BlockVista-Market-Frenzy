@@ -1,4 +1,3 @@
-```python
 # BlockVista Market Frenzy
 import streamlit as st
 import pandas as pd
@@ -500,4 +499,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
+
