@@ -1055,4 +1055,3 @@ def run_game_tick(prices):
 
 if __name__ == "__main__":
     main()
-</xaiArtifact>
