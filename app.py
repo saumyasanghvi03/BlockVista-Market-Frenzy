@@ -708,6 +708,61 @@ def render_sidebar():
             elif criterion == "min_trades":
                 st.sidebar.write(f"• Min Trades: {value}")
         
+        # Level Duration Control
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("⏱️ Level Duration Control")
+        
+        # Current duration display
+        current_duration_minutes = game_state.level_duration_seconds // 60
+        st.sidebar.write(f"Current Duration: **{current_duration_minutes} minutes**")
+        
+        # Duration adjustment
+        new_duration_minutes = st.sidebar.number_input(
+            "Set Level Duration (minutes)", 
+            min_value=1, 
+            max_value=60, 
+            value=int(current_duration_minutes),
+            step=1,
+            key="level_duration_input"
+        )
+        
+        if st.sidebar.button("Update Level Duration", key="update_duration"):
+            if new_duration_minutes != current_duration_minutes:
+                game_state.level_duration_seconds = new_duration_minutes * 60
+                
+                # Also update the LEVEL_CONFIG for persistence
+                LEVEL_CONFIG[game_state.current_level]["duration_minutes"] = new_duration_minutes
+                
+                st.sidebar.success(f"Level duration updated to {new_duration_minutes} minutes")
+                
+                # If game is running, adjust the futures expiry time proportionally
+                if game_state.game_status == "Running":
+                    elapsed_time = time.time() - game_state.level_start_time
+                    progress_ratio = elapsed_time / (current_duration_minutes * 60)
+                    new_elapsed_time = progress_ratio * game_state.level_duration_seconds
+                    game_state.level_start_time = time.time() - new_elapsed_time
+                    game_state.futures_expiry_time = game_state.level_start_time + (game_state.level_duration_seconds / 2)
+                    st.sidebar.info("Adjusted level timing for active game session")
+        
+        # Quick duration presets
+        st.sidebar.markdown("**Quick Presets:**")
+        col1, col2, col3 = st.sidebar.columns(3)
+        with col1:
+            if st.button("5 min", key="preset_5"):
+                game_state.level_duration_seconds = 5 * 60
+                LEVEL_CONFIG[game_state.current_level]["duration_minutes"] = 5
+                st.sidebar.success("Duration set to 5 minutes")
+        with col2:
+            if st.button("10 min", key="preset_10"):
+                game_state.level_duration_seconds = 10 * 60
+                LEVEL_CONFIG[game_state.current_level]["duration_minutes"] = 10
+                st.sidebar.success("Duration set to 10 minutes")
+        with col3:
+            if st.button("15 min", key="preset_15"):
+                game_state.level_duration_seconds = 15 * 60
+                LEVEL_CONFIG[game_state.current_level]["duration_minutes"] = 15
+                st.sidebar.success("Duration set to 15 minutes")
+
         # Game controls
         col1, col2 = st.sidebar.columns(2)
         with col1:
