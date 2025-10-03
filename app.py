@@ -943,30 +943,16 @@ def render_admin_performance_chart():
         st.info("No players have joined yet.")
         return
         
-    # Use individual charts to avoid the array length issue
-    st.write("**Individual Player Performance Charts**")
-    
+    chart_data = {}
     for name, player_data in game_state.players.items():
-        if player_data.get('value_history') and len(player_data['value_history']) > 1:
-            with st.expander(f"{name} ({player_data['mode']})", expanded=False):
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    st.line_chart(player_data['value_history'])
-                
-                with col2:
-                    current_value = player_data['value_history'][-1]
-                    initial_value = player_data['value_history'][0]
-                    returns = (current_value - initial_value) / initial_value * 100
-                    
-                    st.metric("Current", format_indian_currency(current_value))
-                    st.metric("Return", f"{returns:.2f}%")
-                    st.metric("Trades", len(game_state.transactions.get(name, [])))
-                    
-                    # Calculate Sharpe ratio if we have enough data
-                    if len(player_data['value_history']) > 5:
-                        sharpe = calculate_sharpe_ratio(player_data['value_history'])
-                        st.metric("Sharpe", f"{sharpe:.2f}")
+        if player_data.get('value_history'):
+            chart_data[name] = player_data['value_history']
+            
+    if chart_data:
+        df = pd.DataFrame(chart_data)
+        st.line_chart(df)
+    else:
+        st.info("No trading activity yet to display.")
 
 def render_trade_execution_panel(prices):
     game_state = get_game_state()
