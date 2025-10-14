@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import numpy as np
 from pypfopt import EfficientFrontier, risk_models, expected_returns
+import threading
+from collections import defaultdict
+import queue
 
 # --- Page Configuration ---
 st.set_page_config(layout="wide", page_title="BlockVista Market Frenzy", page_icon="📈")
@@ -130,9 +133,9 @@ PRE_BUILT_NEWS = [
     {"headline": "High short interest in {symbol} triggers a potential short squeeze!", "impact": "Short Squeeze"},
 ]
 
-# --- Enhanced Game State Management ---
+# --- Enhanced Game State Management with Thread Safety ---
 class GameState:
-    """Enhanced game state with multi-level support"""
+    """Enhanced game state with multi-level support and thread safety"""
     def __init__(self):
         self.players = {}
         self.game_status = "Stopped"
@@ -144,7 +147,7 @@ class GameState:
         self.prices = {}
         self.base_real_prices = {}
         self.price_history = []
-        self.transactions = {}
+        self.transactions = defaultdict(list)
         self.market_sentiment = {s: 0 for s in ALL_SYMBOLS}
         self.liquidity = {s: random.uniform(0.5, 1.0) for s in ALL_SYMBOLS}
         self.event_active = False
@@ -166,102 +169,132 @@ class GameState:
         self.short_squeeze_threshold = 3
         self.level_winners = {1: [], 2: [], 3: []}
         self.performance_boost_active = {}
+        self._lock = threading.RLock()  # Thread safety
+
+    def acquire_lock(self):
+        """Acquire thread lock"""
+        return self._lock
 
     def reset(self):
         """Reset game but preserve level progress"""
-        # Store current level before reset
-        current_level = self.current_level
-        level_winners = self.level_winners.copy()
-        
-        # Re-initialize
-        self.__init__()
-        
-        # Restore level progress
-        self.current_level = current_level
-        self.level_winners = level_winners
-        
-        # Update level-specific settings
-        level_config = LEVEL_CONFIG[self.current_level]
-        self.volatility_multiplier = level_config["volatility"]
-        self.current_margin_requirement = level_config["margin_requirement"]
-        self.level_duration_seconds = level_config["duration_minutes"] * 60
+        with self._lock:
+            # Store current level before reset
+            current_level = self.current_level
+            level_winners = self.level_winners.copy()
+            
+            # Re-initialize
+            self.__init__()
+            
+            # Restore level progress
+            self.current_level = current_level
+            self.level_winners = level_winners
+            
+            # Update level-specific settings
+            level_config = LEVEL_CONFIG[self.current_level]
+            self.volatility_multiplier = level_config["volatility"]
+            self.current_margin_requirement = level_config["margin_requirement"]
+            self.level_duration_seconds = level_config["duration_minutes"] * 60
+
+    def add_player(self, player_name, player_data):
+        """Thread-safe player addition"""
+        with self._lock:
+            if player_name not in self.players:
+                self.players[player_name] = player_data
+                self.transactions[player_name] = []
+                return True
+            return False
+
+    def update_player(self, player_name, updates):
+        """Thread-safe player update"""
+        with self._lock:
+            if player_name in self.players:
+                self.players[player_name].update(updates)
+                return True
+            return False
+
+    def get_player(self, player_name):
+        """Thread-safe player retrieval"""
+        with self._lock:
+            return self.players.get(player_name)
 
     def advance_to_next_level(self):
         """Advance qualified players to the next level"""
-        if self.current_level >= 3:
-            return False  # Game complete
-            
-        next_level = self.current_level + 1
-        current_winners = self.evaluate_level_winners()
-        
-        if not current_winners:
-            st.error("No winners qualified for next level! Game cannot continue.")
-            return False
-            
-        # Store winners for current level
-        self.level_winners[self.current_level] = current_winners
-        
-        # Store current players before clearing
-        old_players = self.players.copy()
-        
-        # Clear and recreate players for next level
-        self.players = {}
-        for player_name in current_winners:
-            old_player_data = old_players.get(player_name)
-            if old_player_data:
-                # Apply performance-based capital adjustment
-                performance_multiplier = self.calculate_performance_multiplier(old_player_data)
-                player_type_config = PLAYER_TYPES[old_player_data['mode']]
+        with self._lock:
+            if self.current_level >= 3:
+                return False  # Game complete
                 
-                holdings_value = sum(self.prices.get(s, 0) * q for s, q in old_player_data['holdings'].items())
-                new_capital = old_player_data['capital'] * performance_multiplier * player_type_config['winning_bonus']
-                total_start_value = new_capital + holdings_value
+            next_level = self.current_level + 1
+            current_winners = self.evaluate_level_winners()
+            
+            if not current_winners:
+                st.error("No winners qualified for next level! Game cannot continue.")
+                return False
                 
-                self.players[player_name] = {
-                    "name": player_name,
-                    "mode": old_player_data['mode'],
-                    "capital": new_capital,
-                    "holdings": old_player_data['holdings'].copy(),  # Carry forward portfolio
-                    "pnl": 0,
-                    "leverage": 1.0,
-                    "margin_calls": 0,
-                    "pending_orders": [],
-                    "algo": old_player_data.get('algo', 'Off'),
-                    "custom_algos": old_player_data.get('custom_algos', {}).copy(),
-                    "slippage_multiplier": player_type_config['slippage_multiplier'],
-                    "value_history": [total_start_value],
-                    "trade_timestamps": [],
-                    "level_start_value": total_start_value
-                }
-        
-        self.current_level = next_level
-        level_config = LEVEL_CONFIG[next_level]
-        
-        # Update game parameters for new level
-        self.volatility_multiplier = level_config["volatility"]
-        self.current_margin_requirement = level_config["margin_requirement"]
-        self.level_duration_seconds = level_config["duration_minutes"] * 60
-        
-        # Reset game state for new level
-        self.game_status = "Running"
-        self.level_start_time = time.time()
-        self.futures_expiry_time = time.time() + (self.level_duration_seconds / 2)
-        self.auto_square_off_complete = False
-        self.closing_warning_triggered = False
-        self.futures_settled = False
-        
-        return True
+            # Store winners for current level
+            self.level_winners[self.current_level] = current_winners
+            
+            # Store current players before clearing
+            old_players = self.players.copy()
+            
+            # Clear and recreate players for next level
+            self.players = {}
+            for player_name in current_winners:
+                old_player_data = old_players.get(player_name)
+                if old_player_data:
+                    # Apply performance-based capital adjustment
+                    performance_multiplier = self.calculate_performance_multiplier(old_player_data)
+                    player_type_config = PLAYER_TYPES[old_player_data['mode']]
+                    
+                    holdings_value = sum(self.prices.get(s, 0) * q for s, q in old_player_data['holdings'].items())
+                    new_capital = old_player_data['capital'] * performance_multiplier * player_type_config['winning_bonus']
+                    total_start_value = new_capital + holdings_value
+                    
+                    self.players[player_name] = {
+                        "name": player_name,
+                        "mode": old_player_data['mode'],
+                        "capital": new_capital,
+                        "holdings": old_player_data['holdings'].copy(),  # Carry forward portfolio
+                        "pnl": 0,
+                        "leverage": 1.0,
+                        "margin_calls": 0,
+                        "pending_orders": [],
+                        "algo": old_player_data.get('algo', 'Off'),
+                        "custom_algos": old_player_data.get('custom_algos', {}).copy(),
+                        "slippage_multiplier": player_type_config['slippage_multiplier'],
+                        "value_history": [total_start_value],
+                        "trade_timestamps": [],
+                        "level_start_value": total_start_value
+                    }
+            
+            self.current_level = next_level
+            level_config = LEVEL_CONFIG[next_level]
+            
+            # Update game parameters for new level
+            self.volatility_multiplier = level_config["volatility"]
+            self.current_margin_requirement = level_config["margin_requirement"]
+            self.level_duration_seconds = level_config["duration_minutes"] * 60
+            
+            # Reset game state for new level
+            self.game_status = "Running"
+            self.level_start_time = time.time()
+            self.futures_expiry_time = time.time() + (self.level_duration_seconds / 2)
+            self.auto_square_off_complete = False
+            self.closing_warning_triggered = False
+            self.futures_settled = False
+            
+            return True
 
     def evaluate_level_winners(self):
         """Evaluate which players qualify for the next level"""
-        winners = []
-        level_criteria = LEVEL_CONFIG[self.current_level]["winning_criteria"]
-        
-        for player_name, player_data in self.players.items():
-            if self.check_player_qualifies(player_data, level_criteria):
-                winners.append(player_name)
-                
-        return winners
+        with self._lock:
+            winners = []
+            level_criteria = LEVEL_CONFIG[self.current_level]["winning_criteria"]
+            
+            for player_name, player_data in self.players.items():
+                if self.check_player_qualifies(player_data, level_criteria):
+                    winners.append(player_name)
+                    
+            return winners
 
     def check_player_qualifies(self, player_data, criteria):
         """Check if player meets level completion criteria"""
@@ -333,6 +366,10 @@ class GameState:
                 
         except:
             return 1.0
+
+# Performance optimization for 30 players
+MAX_PLAYERS = 30
+PRICE_HISTORY_LIMIT = 50  # Limit price history to prevent memory issues
 
 @st.cache_resource
 def get_game_state():
@@ -414,6 +451,7 @@ def announce_news(headline):
     <script>
         if ('speechSynthesis' in window) {{
             const utterance = new SpeechSynthesisUtterance('{safe_headline}');
+            utterance.rate = 1.2;
             speechSynthesis.speak(utterance);
         }}
     </script>
@@ -427,13 +465,19 @@ def get_daily_base_prices():
     prices = {}
     yf_symbols = NIFTY50_SYMBOLS + CRYPTO_SYMBOLS + [GOLD_SYMBOL, NIFTY_INDEX_SYMBOL, BANKNIFTY_INDEX_SYMBOL]
     try:
-        data = yf.download(tickers=yf_symbols, period="1d", interval="1m", progress=False)
-        for symbol in yf_symbols:
-            if not data.empty and symbol in data['Close'] and not pd.isna(data['Close'][symbol].iloc[-1]):
-                prices[symbol] = data['Close'][symbol].iloc[-1]
-            else: # Fallback
-                prices[symbol] = random.uniform(10, 50000)
-    except Exception:
+        # Fetch data in smaller batches to avoid timeout
+        batch_size = 5
+        for i in range(0, len(yf_symbols), batch_size):
+            batch = yf_symbols[i:i+batch_size]
+            data = yf.download(tickers=batch, period="1d", interval="1m", progress=False, timeout=10)
+            for symbol in batch:
+                if not data.empty and symbol in data['Close'] and not pd.isna(data['Close'][symbol].iloc[-1]):
+                    prices[symbol] = data['Close'][symbol].iloc[-1]
+                else: # Fallback
+                    prices[symbol] = random.uniform(10, 50000)
+            time.sleep(0.5)  # Small delay between batches
+    except Exception as e:
+        st.warning(f"Using fallback prices due to API error: {e}")
         for symbol in yf_symbols: # Full fallback on API error
             prices[symbol] = random.uniform(10, 50000)
     return prices
@@ -488,12 +532,17 @@ def calculate_derived_prices(base_prices):
 @st.cache_data(ttl=3600)
 def get_historical_data(symbols, period="6mo"):
     try:
-        data = yf.download(tickers=symbols, period=period, progress=False)
+        # Handle single symbol case
+        if isinstance(symbols, str):
+            symbols = [symbols]
+            
+        data = yf.download(tickers=symbols, period=period, progress=False, timeout=10)
         close_data = data['Close']
         if isinstance(close_data, pd.Series):
             return close_data.to_frame(name=symbols[0])
         return close_data
-    except Exception:
+    except Exception as e:
+        st.warning(f"Could not fetch historical data for {symbols}: {e}")
         return pd.DataFrame()
 
 # --- Game Logic Functions ---
@@ -611,6 +660,12 @@ def render_sidebar():
     
     if 'player' not in st.query_params:
         st.sidebar.title("📝 Game Entry")
+        
+        # Player limit check
+        if len(game_state.players) >= MAX_PLAYERS:
+            st.sidebar.error(f"❌ Game is full! Maximum {MAX_PLAYERS} players allowed.")
+            return
+            
         player_name = st.sidebar.text_input("Enter Name", key="name_input")
         
         # Enhanced player type selection with descriptions
@@ -626,14 +681,11 @@ def render_sidebar():
                        f"Margin: {current_level_config['margin_requirement']*100}%")
         
         if st.sidebar.button("Join Game", type="primary"):
-            if player_name and player_name.strip() and player_name not in game_state.players:
-                player_config = PLAYER_TYPES[mode]
-                starting_capital = INITIAL_CAPITAL * player_config['initial_capital_multiplier']
-                
-                game_state.players[player_name] = {
+            if player_name and player_name.strip():
+                if game_state.add_player(player_name, {
                     "name": player_name, 
                     "mode": mode, 
-                    "capital": starting_capital, 
+                    "capital": INITIAL_CAPITAL * PLAYER_TYPES[mode]['initial_capital_multiplier'], 
                     "holdings": {}, 
                     "pnl": 0, 
                     "leverage": 1.0, 
@@ -641,23 +693,27 @@ def render_sidebar():
                     "pending_orders": [], 
                     "algo": "Off", 
                     "custom_algos": {},
-                    "slippage_multiplier": player_config['slippage_multiplier'],
-                    "value_history": [starting_capital],
+                    "slippage_multiplier": PLAYER_TYPES[mode]['slippage_multiplier'],
+                    "value_history": [INITIAL_CAPITAL * PLAYER_TYPES[mode]['initial_capital_multiplier']],
                     "trade_timestamps": [],
-                    "level_start_value": starting_capital
-                }
-                game_state.transactions[player_name] = []
-                st.query_params["player"] = player_name
-                st.rerun()
+                    "level_start_value": INITIAL_CAPITAL * PLAYER_TYPES[mode]['initial_capital_multiplier']
+                }):
+                    st.query_params["player"] = player_name
+                    st.rerun()
+                else: 
+                    st.sidebar.error("Name is already taken!")
             else: 
-                st.sidebar.error("Name is invalid or already taken!")
+                st.sidebar.error("Please enter a valid name!")
     else:
         current_player = st.query_params['player']
-        player_data = game_state.players.get(current_player, {})
-        st.sidebar.success(f"Logged in as {current_player}")
-        st.sidebar.info(f"Type: {player_data.get('mode', 'N/A')}\n"
-                       f"Level: {game_state.current_level}")
-        
+        player_data = game_state.get_player(current_player)
+        if player_data:
+            st.sidebar.success(f"Logged in as {current_player}")
+            st.sidebar.info(f"Type: {player_data.get('mode', 'N/A')}\n"
+                           f"Level: {game_state.current_level}")
+        else:
+            st.sidebar.error("Player data not found!")
+            
         if st.sidebar.button("Logout"):
             st.query_params.clear()
             st.rerun()
@@ -676,6 +732,21 @@ def render_sidebar():
             st.rerun()
 
         st.sidebar.title("⚙️ Admin Controls")
+        
+        # Player management
+        st.sidebar.subheader("Player Management")
+        st.sidebar.write(f"Active Players: {len(game_state.players)}/{MAX_PLAYERS}")
+        
+        if game_state.players:
+            player_to_remove = st.sidebar.selectbox("Select Player to Remove", list(game_state.players.keys()))
+            if st.sidebar.button("Remove Player"):
+                with game_state.acquire_lock():
+                    if player_to_remove in game_state.players:
+                        del game_state.players[player_to_remove]
+                        if player_to_remove in game_state.transactions:
+                            del game_state.transactions[player_to_remove]
+                        st.sidebar.success(f"Removed player: {player_to_remove}")
+                        st.rerun()
         
         # Level management
         st.sidebar.subheader("Level Management")
@@ -946,7 +1017,8 @@ def render_admin_performance_chart():
     chart_data = {}
     for name, player_data in game_state.players.items():
         if player_data.get('value_history'):
-            chart_data[name] = player_data['value_history']
+            # Limit history length for performance
+            chart_data[name] = player_data['value_history'][-50:]
             
     if chart_data:
         df = pd.DataFrame(chart_data)
@@ -960,11 +1032,15 @@ def render_trade_execution_panel(prices):
     with st.container(border=True):
         st.subheader("Trade Execution Panel")
         acting_player = st.query_params.get("player")
-        if not acting_player or acting_player not in game_state.players:
+        if not acting_player:
             st.warning("Please join the game to access your trading terminal.")
             return
         
-        player = game_state.players[acting_player]
+        player = game_state.get_player(acting_player)
+        if not player:
+            st.warning("Player data not found. Please rejoin the game.")
+            return
+            
         player_config = PLAYER_TYPES[player['mode']]
         
         st.markdown(f"**{acting_player}'s Terminal**")
@@ -1028,32 +1104,48 @@ def render_market_order_ui(player_name, player, prices, disabled):
 
     col1, col2 = st.columns([2, 1])
     with col1:
-        if asset_type == "Stock": symbol_choice = st.selectbox("Stock", [s.replace('.NS', '') for s in NIFTY50_SYMBOLS], key=f"market_stock_{player_name}", disabled=disabled) + '.NS'
-        elif asset_type == "Crypto": symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"market_crypto_{player_name}", disabled=disabled)
-        elif asset_type == "Gold": symbol_choice = GOLD_SYMBOL
-        elif asset_type == "Futures": symbol_choice = st.selectbox("Futures", FUTURES_SYMBOLS, key=f"market_futures_{player_name}", disabled=disabled)
-        elif asset_type == "Leveraged ETF": symbol_choice = st.selectbox("Leveraged ETF", LEVERAGED_ETFS, key=f"market_letf_{player_name}", disabled=disabled)
-        else: symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"market_option_{player_name}", disabled=disabled)
+        if asset_type == "Stock": 
+            symbol_choice = st.selectbox("Stock", [s.replace('.NS', '') for s in NIFTY50_SYMBOLS], key=f"market_stock_{player_name}", disabled=disabled) + '.NS'
+        elif asset_type == "Crypto": 
+            symbol_choice = st.selectbox("Cryptocurrency", CRYPTO_SYMBOLS, key=f"market_crypto_{player_name}", disabled=disabled)
+        elif asset_type == "Gold": 
+            symbol_choice = GOLD_SYMBOL
+        elif asset_type == "Futures": 
+            symbol_choice = st.selectbox("Futures", FUTURES_SYMBOLS, key=f"market_futures_{player_name}", disabled=disabled)
+        elif asset_type == "Leveraged ETF": 
+            symbol_choice = st.selectbox("Leveraged ETF", LEVERAGED_ETFS, key=f"market_letf_{player_name}", disabled=disabled)
+        else: 
+            symbol_choice = st.selectbox("Option", OPTION_SYMBOLS, key=f"market_option_{player_name}", disabled=disabled)
     with col2:
         qty = st.number_input("Quantity", min_value=1, step=1, value=1, key=f"market_qty_{player_name}", disabled=disabled)
     
     mid_price = prices.get(symbol_choice, 0)
+    if mid_price == 0:
+        st.error("Asset price not available")
+        return
+        
     ask_price = mid_price * (1 + get_game_state().bid_ask_spread / 2)
     bid_price = mid_price * (1 - get_game_state().bid_ask_spread / 2)
     st.info(f"Bid: {format_indian_currency(bid_price)} | Ask: {format_indian_currency(ask_price)}")
 
     b1, b2, b3 = st.columns(3)
     if b1.button(f"Buy {qty} at Ask", key=f"buy_{player_name}", use_container_width=True, disabled=disabled, type="primary"): 
-        if execute_trade(player_name, player, "Buy", symbol_choice, qty, prices): play_sound('success')
-        else: play_sound('error')
+        if execute_trade(player_name, player, "Buy", symbol_choice, qty, prices): 
+            play_sound('success')
+        else: 
+            play_sound('error')
         st.rerun()
     if b2.button(f"Sell {qty} at Bid", key=f"sell_{player_name}", use_container_width=True, disabled=disabled): 
-        if execute_trade(player_name, player, "Sell", symbol_choice, qty, prices): play_sound('success')
-        else: play_sound('error')
+        if execute_trade(player_name, player, "Sell", symbol_choice, qty, prices): 
+            play_sound('success')
+        else: 
+            play_sound('error')
         st.rerun()
     if b3.button(f"Short {qty} at Bid", key=f"short_{player_name}", use_container_width=True, disabled=disabled): 
-        if execute_trade(player_name, player, "Short", symbol_choice, qty, prices): play_sound('success')
-        else: play_sound('error')
+        if execute_trade(player_name, player, "Short", symbol_choice, qty, prices): 
+            play_sound('success')
+        else: 
+            play_sound('error')
         st.rerun()
 
 def render_limit_order_ui(player_name, player, prices, disabled):
@@ -1118,27 +1210,37 @@ def render_current_holdings(player, prices):
 def render_transaction_history(player_name):
     game_state = get_game_state()
     st.subheader("Transaction History")
-    if game_state.transactions.get(player_name):
-        trans_df = pd.DataFrame(game_state.transactions[player_name], columns=["Time", "Action", "Symbol", "Qty", "Price", "Total"])
+    transactions = game_state.transactions.get(player_name, [])
+    if transactions:
+        # Limit to last 50 transactions for performance
+        recent_transactions = transactions[-50:]
+        trans_df = pd.DataFrame(recent_transactions, columns=["Time", "Action", "Symbol", "Qty", "Price", "Total"])
         st.dataframe(trans_df.style.format(formatter={"Price": format_indian_currency, "Total": format_indian_currency}), use_container_width=True)
-    else: st.info("No transactions recorded.")
+    else: 
+        st.info("No transactions recorded.")
 
 def render_strategy_tab(player):
     st.subheader("📊 Strategy & Insights")
     tab1, tab2, tab3 = st.tabs(["Performance Chart", "Technical Analysis (SMA)", "Portfolio Optimizer"])
     with tab1:
         st.markdown("##### Portfolio Value Over Time")
-        if len(player.get('value_history', [])) > 1:
-            st.line_chart(player['value_history'])
+        value_history = player.get('value_history', [])
+        if len(value_history) > 1:
+            # Limit history for performance
+            st.line_chart(value_history[-50:])
         else:
             st.info("Trade more to see your performance chart.")
-    with tab2: render_sma_chart(player['holdings'])
-    with tab3: render_optimizer(player['holdings'])
+    with tab2: 
+        render_sma_chart(player['holdings'])
+    with tab3: 
+        render_optimizer(player['holdings'])
 
 def render_sma_chart(holdings):
     st.markdown("##### Simple Moving Average (SMA) Chart")
     chartable_assets = [s for s in holdings.keys() if s not in OPTION_SYMBOLS + FUTURES_SYMBOLS + LEVERAGED_ETFS]
-    if not chartable_assets: st.info("No chartable assets in portfolio to analyze."); return
+    if not chartable_assets: 
+        st.info("No chartable assets in portfolio to analyze."); 
+        return
     chart_symbol = st.selectbox("Select Asset to Chart", chartable_assets)
     hist_data = get_historical_data([chart_symbol], period="6mo")
     if not hist_data.empty:
@@ -1149,7 +1251,8 @@ def render_sma_chart(holdings):
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], mode='lines', name='20-Day SMA'))
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], mode='lines', name='50-Day SMA'))
         st.plotly_chart(fig, use_container_width=True)
-    else: st.warning(f"Could not load historical data for {chart_symbol}.")
+    else: 
+        st.warning(f"Could not load historical data for {chart_symbol}.")
 
 def render_optimizer(holdings):
     st.subheader("Portfolio Optimization (Max Sharpe Ratio)")
@@ -1163,7 +1266,8 @@ def render_optimizer(holdings):
 def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=False, order_type="Market"):
     game_state = get_game_state()
     mid_price = prices.get(symbol, 0)
-    if mid_price == 0: return False
+    if mid_price == 0: 
+        return False
 
     if action == "Buy":
         trade_price = mid_price * (1 + game_state.bid_ask_spread / 2)
@@ -1187,7 +1291,8 @@ def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=Fals
         if trade_executed and player['holdings'][symbol] == 0: del player['holdings'][symbol]
     
     if trade_executed: 
-        get_game_state().market_sentiment[symbol] = get_game_state().market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
+        with game_state.acquire_lock():
+            game_state.market_sentiment[symbol] = game_state.market_sentiment.get(symbol, 0) + (qty / 50) * (1 if action in ["Buy", "Short"] else -1)
         log_transaction(player_name, f"{order_type} {action}", symbol, qty, trade_price, cost, is_algo)
     elif not is_algo: 
         st.error("Trade failed: Insufficient capital or holdings.")
@@ -1196,7 +1301,12 @@ def execute_trade(player_name, player, action, symbol, qty, prices, is_algo=Fals
 def log_transaction(player_name, action, symbol, qty, price, total, is_algo=False):
     game_state = get_game_state()
     prefix = "🤖 Algo" if is_algo else ""
-    game_state.transactions.setdefault(player_name, []).append([time.strftime("%H:%M:%S"), f"{prefix} {action}".strip(), symbol, qty, price, total])
+    with game_state.acquire_lock():
+        game_state.transactions[player_name].append([time.strftime("%H:%M:%S"), f"{prefix} {action}".strip(), symbol, qty, price, total])
+        # Limit transaction history for performance
+        if len(game_state.transactions[player_name]) > 100:
+            game_state.transactions[player_name] = game_state.transactions[player_name][-50:]
+            
     if "Auto-Liquidation" in action or "Settlement" in action:
         st.toast(f"{action}: {qty} {symbol}", icon="⚠️")
     elif not is_algo: 
@@ -1268,21 +1378,31 @@ def render_leaderboard(prices):
                 st.error("❌ No players qualified for the next level!")
 
 def render_live_market_table(prices):
-    game_state = get_game_state(); prices_df = pd.DataFrame(prices.items(), columns=['Symbol', 'Price'])
+    game_state = get_game_state()
+    prices_df = pd.DataFrame(prices.items(), columns=['Symbol', 'Price'])
+    
+    # Calculate price changes efficiently
     if len(game_state.price_history) >= 2:
         prev_prices = game_state.price_history[-2]
         prices_df['prev_price'] = prices_df['Symbol'].map(prev_prices).fillna(prices_df['Price'])
         prices_df['Change'] = prices_df['Price'] - prices_df['prev_price']
-    else: prices_df['Change'] = 0.0
+    else: 
+        prices_df['Change'] = 0.0
     prices_df.drop(columns=['prev_price'], inplace=True, errors='ignore')
 
-    all_trades = [[player] + t for player, transactions in game_state.transactions.items() for t in transactions]
-    if all_trades:
-        feed_df = pd.DataFrame(all_trades, columns=["Player", "Time", "Action", "Symbol", "Qty", "Trade Price", "Total"])
-        last_trades = feed_df.sort_values('Time').groupby('Symbol').last()
+    # Get recent trades efficiently
+    recent_trades = []
+    for player, transactions in game_state.transactions.items():
+        if transactions:
+            recent_trades.append([player] + transactions[-1])  # Only show last trade per player
+    
+    if recent_trades:
+        feed_df = pd.DataFrame(recent_trades, columns=["Player", "Time", "Action", "Symbol", "Qty", "Trade Price", "Total"])
+        last_trades = feed_df.groupby('Symbol').last().reset_index()
         last_trades['Last Order'] = last_trades.apply(lambda r: f"{r['Player']} {r['Action']} {r['Qty']} @ {format_indian_currency(r['Trade Price'])}", axis=1)
-        prices_df = pd.merge(prices_df, last_trades[['Last Order']], on='Symbol', how='left')
-    else: prices_df['Last Order'] = '-'
+        prices_df = pd.merge(prices_df, last_trades[['Symbol', 'Last Order']], on='Symbol', how='left')
+    else: 
+        prices_df['Last Order'] = '-'
     prices_df.fillna({'Last Order': '-'}, inplace=True)
     
     st.dataframe(prices_df.style.apply(lambda x: ['color: green' if v > 0 else 'color: red' if v < 0 else '' for v in x], subset=['Change']).format({'Price': format_indian_currency, 'Change': lambda v: f"{format_indian_currency(v) if v != 0 else '-'}"}), use_container_width=True, hide_index=True)
@@ -1290,7 +1410,8 @@ def render_live_market_table(prices):
 # --- Main Game Loop Functions ---
 def run_game_tick(prices):
     game_state = get_game_state()
-    if game_state.game_status != "Running": return prices
+    if game_state.game_status != "Running": 
+        return prices
     
     # Check level completion
     if time.time() - game_state.level_start_time >= game_state.level_duration_seconds:
@@ -1330,7 +1451,8 @@ def run_game_tick(prices):
             headline = headline.format(symbol=target_symbol.replace(".NS", ""))
         
         game_state.news_feed.insert(0, f"📢 {time.strftime('%H:%M:%S')} - {headline}")
-        if len(game_state.news_feed) > 5: game_state.news_feed.pop()
+        if len(game_state.news_feed) > 5: 
+            game_state.news_feed.pop()
         
         game_state.event_type = impact
         game_state.event_target_symbol = target_symbol # Store target for apply_event_adjustment
@@ -1355,6 +1477,9 @@ def run_game_tick(prices):
         holdings_value = sum(prices.get(symbol, 0) * qty for symbol, qty in player['holdings'].items())
         total_value = player['capital'] + holdings_value
         player['value_history'].append(total_value)
+        # Limit history length for performance
+        if len(player['value_history']) > 100:
+            player['value_history'] = player['value_history'][-50:]
         
     return prices
 
@@ -1496,9 +1621,11 @@ def main():
     
     game_state.prices = final_prices
     
-    if not isinstance(game_state.price_history, list): game_state.price_history = []
+    if not isinstance(game_state.price_history, list): 
+        game_state.price_history = []
     game_state.price_history.append(final_prices)
-    if len(game_state.price_history) > 10: game_state.price_history.pop(0)
+    if len(game_state.price_history) > PRICE_HISTORY_LIMIT: 
+        game_state.price_history.pop(0)
     
     if st.session_state.role == 'admin':
         st.title(f"👑 {GAME_NAME} - Admin Dashboard")
