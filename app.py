@@ -736,7 +736,7 @@ def render_sidebar():
         render_admin_controls()
 
 def render_admin_controls():
-    """Optimized admin controls"""
+    """Optimized admin controls with Quick Actions"""
     game_state = get_game_state()
     
     # Player management
@@ -744,9 +744,9 @@ def render_admin_controls():
     st.sidebar.write(f"Active: {len(game_state.players)}/{MAX_PLAYERS}")
     
     if game_state.players:
-        player_to_remove = st.sidebar.selectbox("Select Player", list(game_state.players.keys()))
+        player_to_remove = st.sidebar.selectbox("Select Player", list(game_state.players.keys()), key="player_select")
         col1, col2 = st.sidebar.columns(2)
-        if col1.button("Remove", use_container_width=True):
+        if col1.button("Remove", use_container_width=True, key="remove_player"):
             with game_state.acquire_lock():
                 if player_to_remove in game_state.players:
                     del game_state.players[player_to_remove]
@@ -756,7 +756,7 @@ def render_admin_controls():
                     st.rerun()
         
         # Quick actions
-        if col2.button("Remove All", use_container_width=True):
+        if col2.button("Remove All", use_container_width=True, key="remove_all"):
             game_state.players.clear()
             game_state.transactions.clear()
             st.rerun()
@@ -765,7 +765,7 @@ def render_admin_controls():
     st.sidebar.subheader("🎮 Game Controls")
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        if st.button("▶️ Start", use_container_width=True, type="primary"):
+        if st.button("▶️ Start", use_container_width=True, type="primary", key="start_game"):
             if game_state.players:
                 game_state.game_status = "Running"
                 game_state.level_start_time = time.time()
@@ -774,11 +774,11 @@ def render_admin_controls():
             else: 
                 st.sidebar.warning("Add players first!")
     with col2:
-        if st.button("⏸️ Stop", use_container_width=True):
+        if st.button("⏸️ Stop", use_container_width=True, key="stop_game"):
             game_state.game_status = "Stopped"
             st.rerun()
     
-    if st.button("🔄 Reset Game", use_container_width=True):
+    if st.button("🔄 Reset Game", use_container_width=True, key="reset_game"):
         game_state.reset()
         st.rerun()
         
@@ -787,7 +787,8 @@ def render_admin_controls():
     if game_state.game_status != "Running":
         new_level = st.sidebar.selectbox("Set Level", [1, 2, 3], 
                                        index=game_state.current_level-1,
-                                       format_func=lambda x: f"Level {x}")
+                                       format_func=lambda x: f"Level {x}",
+                                       key="level_select")
         if new_level != game_state.current_level:
             game_state.current_level = new_level
             level_config = LEVEL_CONFIG[new_level]
@@ -795,22 +796,125 @@ def render_admin_controls():
             game_state.current_margin_requirement = level_config["margin_requirement"]
             game_state.level_duration_seconds = level_config["duration_minutes"] * 60
             st.rerun()
-    
-    # Quick actions
+
+    # ⚡ QUICK ACTIONS SECTION
+    st.sidebar.markdown("---")
     st.sidebar.subheader("⚡ Quick Actions")
-    if st.button("Trigger News Event", use_container_width=True):
-        news_item = random.choice(PRE_BUILT_NEWS)
-        headline = news_item['headline']
-        if "{symbol}" in headline:
-            target_symbol = random.choice(NIFTY50_SYMBOLS)
-            headline = headline.format(symbol=target_symbol.replace(".NS", ""))
+    
+    # Event triggers
+    event_col1, event_col2 = st.sidebar.columns(2)
+    
+    with event_col1:
+        if st.button("📰 Random News", use_container_width=True, key="random_news"):
+            news_item = random.choice(PRE_BUILT_NEWS)
+            headline = news_item['headline']
+            target_symbol = None
+            
+            if "{symbol}" in headline:
+                target_symbol = random.choice(NIFTY50_SYMBOLS)
+                headline = headline.format(symbol=target_symbol.replace(".NS", ""))
+            
+            game_state.news_feed.appendleft(f"📢 {time.strftime('%H:%M:%S')} - {headline}")
+            game_state.event_type = news_item['impact']
+            game_state.event_target_symbol = target_symbol if "{symbol}" in news_item['headline'] else None
+            game_state.event_active = True
+            game_state.event_end = time.time() + 60
+            st.sidebar.success("News event triggered!")
+            st.rerun()
+    
+    with event_col2:
+        if st.button("🎯 Market Crash", use_container_width=True, key="market_crash"):
+            game_state.news_feed.appendleft(f"📢 {time.strftime('%H:%M:%S')} - Flash Crash: Market plunges on unexpected news!")
+            game_state.event_type = "Flash Crash"
+            game_state.event_active = True
+            game_state.event_end = time.time() + 45
+            st.sidebar.error("Market crash triggered!")
+            st.rerun()
+
+    # Market sentiment controls
+    st.sidebar.markdown("**Market Controls**")
+    sentiment_col1, sentiment_col2 = st.sidebar.columns(2)
+    
+    with sentiment_col1:
+        if st.button("📈 Bull Market", use_container_width=True, key="bull_market"):
+            # Boost positive sentiment across all symbols
+            for symbol in game_state.market_sentiment:
+                game_state.market_sentiment[symbol] = min(5, game_state.market_sentiment[symbol] + 2)
+            game_state.news_feed.appendleft(f"📢 {time.strftime('%H:%M:%S')} - Bullish sentiment sweeps the market!")
+            st.sidebar.success("Bull market activated!")
+            st.rerun()
+    
+    with sentiment_col2:
+        if st.button("📉 Bear Market", use_container_width=True, key="bear_market"):
+            # Boost negative sentiment across all symbols
+            for symbol in game_state.market_sentiment:
+                game_state.market_sentiment[symbol] = max(-5, game_state.market_sentiment[symbol] - 2)
+            game_state.news_feed.appendleft(f"📢 {time.strftime('%H:%M:%S')} - Bearish sentiment dominates trading!")
+            st.sidebar.warning("Bear market activated!")
+            st.rerun()
+
+    # Player bonuses
+    st.sidebar.markdown("**Player Actions**")
+    bonus_col1, bonus_col2 = st.sidebar.columns(2)
+    
+    with bonus_col1:
+        if st.button("💰 Give ₹1L to All", use_container_width=True, key="give_bonus"):
+            for player in game_state.players.values():
+                player['capital'] += 100000
+            game_state.news_feed.appendleft(f"📢 {time.strftime('%H:%M:%S')} - Mystery bonus: All players receive ₹1L!")
+            st.sidebar.success("₹1L given to all players!")
+            st.rerun()
+    
+    with bonus_col2:
+        if st.button("⚡ Speed Up Time", use_container_width=True, key="speed_up"):
+            if game_state.game_status == "Running":
+                # Reduce remaining time by 1 minute
+                elapsed = time.time() - game_state.level_start_time
+                new_elapsed = elapsed + 60  # Add 60 seconds
+                if new_elapsed < game_state.level_duration_seconds:
+                    game_state.level_start_time = time.time() - new_elapsed
+                    st.sidebar.info("Time sped up by 1 minute!")
+                else:
+                    # End level immediately
+                    game_state.level_start_time = time.time() - game_state.level_duration_seconds
+                    st.sidebar.warning("Level ending now!")
+                st.rerun()
+
+    # Advanced controls in expander
+    with st.sidebar.expander("🔧 Advanced Controls"):
+        # Volatility adjustment
+        current_volatility = game_state.volatility_multiplier
+        new_volatility = st.slider(
+            "Market Volatility", 
+            min_value=0.1, 
+            max_value=5.0, 
+            value=float(current_volatility),
+            step=0.1,
+            key="volatility_slider"
+        )
+        if new_volatility != current_volatility:
+            game_state.volatility_multiplier = new_volatility
+            st.rerun()
         
-        game_state.news_feed.appendleft(f"📢 {time.strftime('%H:%M:%S')} - {headline}")
-        game_state.event_type = news_item['impact']
-        game_state.event_target_symbol = target_symbol if "{symbol}" in news_item['headline'] else None
-        game_state.event_active = True
-        game_state.event_end = time.time() + 60
-        st.sidebar.success("Event triggered!")
+        # Margin requirement adjustment
+        current_margin = game_state.current_margin_requirement
+        new_margin = st.slider(
+            "Margin Requirement", 
+            min_value=0.1, 
+            max_value=0.5, 
+            value=float(current_margin),
+            step=0.05,
+            key="margin_slider"
+        )
+        if new_margin != current_margin:
+            game_state.current_margin_requirement = new_margin
+            st.rerun()
+        
+        # Force level completion
+        if st.button("🏁 Complete Level Now", use_container_width=True, key="complete_level"):
+            if game_state.game_status == "Running":
+                game_state.level_start_time = time.time() - game_state.level_duration_seconds
+                st.rerun()
 
 def render_main_interface(prices):
     """Optimized main interface"""
@@ -1170,7 +1274,7 @@ def trigger_random_event():
     
     game_state.news_feed.appendleft(f"📢 {time.strftime('%H:%M:%S')} - {headline}")
     game_state.event_type = news_item['impact']
-    game_state.event_target_symbol = target_symbol
+    game_state.event_target_symbol = target_symbol if "{symbol}" in news_item['headline'] else None
     game_state.event_active = True
     game_state.event_end = time.time() + random.randint(30, 60)
 
